@@ -42,7 +42,7 @@ FACTOR_DESCRIPTIONS: Dict[int, str] = {
     9: "Perceptions of whether the level and demands of learning feel appropriate.",
 }
 
-# These are OIS-created, practical school responses. They are not copied from GL's proprietary intervention bank.
+# OIS-created responses. Not copied from GL's intervention bank.
 INTERVENTIONS: Dict[int, Dict[str, List[str] | str]] = {
     1: {
         "focus": "Belonging, safety and connection",
@@ -181,9 +181,9 @@ INTERVENTIONS: Dict[int, Dict[str, List[str] | str]] = {
     },
 }
 
-
 BAND_ORDER = ["Low", "Low-moderate", "Moderate", "High"]
 ATTENTION_ORDER = ["Immediate review", "Targeted support", "Monitor", "Generally positive", "Not completed"]
+LONGITUDINAL_ORDER = ["New concern", "Persistent concern", "Chronic concern", "Recovered", "Watch deterioration", "Stable positive", "Insufficient history"]
 
 
 @dataclass(frozen=True)
@@ -193,6 +193,8 @@ class Schema:
     surname: str
     grade: str
     group: str
+    survey_date: str
+    unique_id: str
 
 
 def factor_band(value: float | int | None) -> str:
@@ -220,13 +222,29 @@ def detect_schema(df: pd.DataFrame) -> Schema:
             raise ValueError(f"Could not find PASS Factor {n} percentile column.")
         factor_cols[n] = matches[0]
 
+    survey_date = "PASS - Date of Survey" if "PASS - Date of Survey" in df.columns else ""
+    unique_id = "TW Unique ID" if "TW Unique ID" in df.columns else ""
     return Schema(
         factor_cols=factor_cols,
         forename="Forename",
         surname="Surname",
         grade="Current Year",
         group="Group",
+        survey_date=survey_date,
+        unique_id=unique_id,
     )
+
+
+def _format_group(value) -> str:
+    if pd.isna(value):
+        return "Unknown"
+    try:
+        as_float = float(value)
+        if as_float.is_integer():
+            return str(int(as_float))
+        return f"{as_float:.1f}".rstrip("0").rstrip(".")
+    except Exception:
+        return str(value).strip()
 
 
 def load_pass_excel(uploaded_file) -> Tuple[pd.DataFrame, Schema, str]:
@@ -246,7 +264,34 @@ def prepare_data(df: pd.DataFrame, schema: Schema) -> pd.DataFrame:
         + out[schema.surname].fillna("").astype(str).str.strip()
     ).str.strip()
     out["Grade"] = out[schema.grade].fillna("Unknown").astype(str).str.strip()
-    out["Homeroom"] = out[schema.group].fillna("Unknown").astype(str).str.strip()
+    out["Homeroom"] = out[schema.group].apply(_format_group)
+    if schema.unique_id and schema.unique_id in out.columns:
+        out["Student ID"] = out[schema.unique_id].fillna("").astype(str).str.strip()
+    else:
+        out["Student ID"] = out["Student"]
+
+    if schema.survey_date and schema.survey_date in out.columns:
+        out["Survey date"] = pd.to_datetime(out[schema.survey_date], errors="coerce")
+    else:
+        out["Survey date"] = pd.NaT
+    if out["Survey date"].isna().all():
+        out["Survey date"] = pd.Timestamp.today().normalize()
+    out["Wave sort"] = out["Survey date"].fillna(pd.Timestamp.today().normalize())
+
+    # Testwise exports can contain late completions several weeks after the main
+    # administration date. Treat dates separated by <=60 days as one survey wave
+    # so late March/April or September/October completions do not become fake waves.
+    unique_dates = sorted(pd.Timestamp(d).normalize() for d in out["Wave sort"].dropna().unique())
+    date_to_wave = {}
+    wave_start = None
+    previous_date = None
+    for date in unique_dates:
+        if previous_date is None or (date - previous_date).days > 60:
+            wave_start = date
+        date_to_wave[date] = wave_start
+        previous_date = date
+    out["Wave key"] = out["Wave sort"].dt.normalize().map(date_to_wave)
+    out["Wave"] = pd.to_datetime(out["Wave key"]).dt.strftime("%b %Y")
 
     factor_columns = list(schema.factor_cols.values())
     for c in factor_columns:
@@ -300,6 +345,33 @@ def prepare_data(df: pd.DataFrame, schema: Schema) -> pd.DataFrame:
     return out
 
 
+def available_waves(df: pd.DataFrame) -> List[str]:
+    waves = (
+        df[["Wave", "Wave key"]]
+        .drop_duplicates(subset=["Wave"])
+        .sort_values("Wave key")
+    )
+    return waves["Wave"].tolist()
+
+
+def latest_snapshot(df: pd.DataFrame) -> pd.DataFrame:
+    latest = df["Wave key"].max()
+    latest_df = df[df["Wave key"] == latest].copy()
+    return latest_df.reset_index(drop=True)
+
+
+def previous_wave_snapshot(df: pd.DataFrame) -> pd.DataFrame:
+    dates = sorted(df["Wave key"].dropna().unique())
+    if len(dates) < 2:
+        return pd.DataFrame(columns=df.columns)
+    prev = dates[-2]
+    return df[df["Wave key"] == prev].copy().reset_index(drop=True)
+
+
+def has_history(df: pd.DataFrame) -> bool:
+    return df["Wave"].nunique() > 1
+
+
 def factor_summary(df: pd.DataFrame, schema: Schema) -> pd.DataFrame:
     rows = []
     for n, col in schema.factor_cols.items():
@@ -328,6 +400,19 @@ def factor_summary(df: pd.DataFrame, schema: Schema) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def wave_factor_summary(df: pd.DataFrame, schema: Schema) -> pd.DataFrame:
+    rows = []
+    for wave in available_waves(df):
+        sub = df[df["Wave"] == wave]
+        fs = factor_summary(sub, schema)
+        if fs.empty:
+            continue
+        fs = fs.copy()
+        fs.insert(0, "Wave", wave)
+        rows.append(fs)
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
 def attention_summary(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
@@ -370,6 +455,7 @@ def homeroom_summary(df: pd.DataFrame, schema: Schema) -> pd.DataFrame:
 def student_priority_table(df: pd.DataFrame) -> pd.DataFrame:
     cols = [
         "Student",
+        "Student ID",
         "Grade",
         "Homeroom",
         "Attention",
@@ -450,3 +536,171 @@ def context_summary_text(df: pd.DataFrame, schema: Schema) -> str:
         + "."
     )
     return " ".join(parts)
+
+
+def student_history(df: pd.DataFrame, student_id: str) -> pd.DataFrame:
+    return df[df["Student ID"] == student_id].sort_values("Wave sort").copy()
+
+
+def student_factor_journey(df: pd.DataFrame, schema: Schema, student_id: str, factors: List[int] | None = None) -> pd.DataFrame:
+    rows = []
+    sub = student_history(df, student_id)
+    factors = factors or list(schema.factor_cols.keys())
+    for _, row in sub.iterrows():
+        for n in factors:
+            col = schema.factor_cols[n]
+            value = row[col]
+            rows.append(
+                {
+                    "Wave": row["Wave"],
+                    "Wave sort": row["Wave sort"],
+                    "Factor": n,
+                    "Factor name": FACTOR_NAMES[n],
+                    "Percentile": None if pd.isna(value) else float(value),
+                    "Band": factor_band(value),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def longitudinal_status_table(history_df: pd.DataFrame, latest_df: pd.DataFrame, schema: Schema, factors: List[int] | None = None) -> pd.DataFrame:
+    factors = factors or list(schema.factor_cols.keys())
+    factor_cols = {n: schema.factor_cols[n] for n in factors}
+    all_dates = sorted(history_df["Wave key"].dropna().unique())
+    prev_date = all_dates[-2] if len(all_dates) >= 2 else None
+    previous_df = history_df[history_df["Wave key"] == prev_date].copy() if prev_date is not None else pd.DataFrame()
+
+    rows = []
+    for _, row in latest_df.iterrows():
+        sid = row["Student ID"]
+        hist = history_df[history_df["Student ID"] == sid].sort_values("Wave key")
+        current_values = {n: row[col] for n, col in factor_cols.items()}
+        current_concerns = {n for n, value in current_values.items() if pd.notna(value) and value <= 20}
+        current_immediate = {n for n, value in current_values.items() if pd.notna(value) and value <= 5}
+        current_moderate = {n for n, value in current_values.items() if pd.notna(value) and 21 <= value <= 30}
+
+        factor_concern_waves = {}
+        for n, col in factor_cols.items():
+            values = hist[["Wave key", col]].dropna().drop_duplicates(subset=["Wave key"], keep="last")
+            factor_concern_waves[n] = int((values[col] <= 20).sum())
+
+        prev_values = {}
+        prev_match = previous_df[previous_df["Student ID"] == sid]
+        if not prev_match.empty:
+            prev_row = prev_match.sort_values("Wave sort").iloc[-1]
+            prev_values = {n: prev_row[col] for n, col in factor_cols.items()}
+        previous_concerns = {n for n, value in prev_values.items() if pd.notna(value) and value <= 20}
+
+        chronic_factors = {n for n in current_concerns if factor_concern_waves.get(n, 0) >= 3}
+        persistent_factors = current_concerns & previous_concerns
+        new_factors = current_concerns - previous_concerns
+        recovered_factors = previous_concerns - current_concerns
+
+        deterioration_factors = set()
+        for n in factors:
+            cur = current_values.get(n)
+            prev = prev_values.get(n)
+            if pd.isna(cur) or pd.isna(prev):
+                continue
+            if (prev > 30 and cur <= 30) or (prev - cur >= 15):
+                deterioration_factors.add(n)
+
+        if not bool(row["Completed PASS"]):
+            trend = "Insufficient history"
+        elif chronic_factors:
+            trend = "Chronic concern"
+        elif persistent_factors:
+            trend = "Persistent concern"
+        elif new_factors:
+            trend = "New concern"
+        elif previous_concerns and not current_concerns and not current_moderate:
+            trend = "Recovered"
+        elif deterioration_factors:
+            trend = "Watch deterioration"
+        else:
+            trend = "Stable positive"
+
+        rows.append(
+            {
+                "Student": row["Student"],
+                "Student ID": sid,
+                "Grade": row["Grade"],
+                "Homeroom": row["Homeroom"],
+                "Attention": str(row["Attention"]),
+                "Longitudinal status": trend,
+                "Current factors ≤20": len(current_concerns),
+                "Current factors ≤5": len(current_immediate),
+                "Current factors 21–30": len(current_moderate),
+                "Previous factors ≤20": len(previous_concerns),
+                "Chronic factors": "; ".join(f"F{n} {FACTOR_SHORT[n]}" for n in sorted(chronic_factors)),
+                "Persistent factors": "; ".join(f"F{n} {FACTOR_SHORT[n]}" for n in sorted(persistent_factors)),
+                "New factors": "; ".join(f"F{n} {FACTOR_SHORT[n]}" for n in sorted(new_factors)),
+                "Recovered factors": "; ".join(f"F{n} {FACTOR_SHORT[n]}" for n in sorted(recovered_factors)),
+                "Deteriorating factors": "; ".join(f"F{n} {FACTOR_SHORT[n]}" for n in sorted(deterioration_factors)),
+                "Concern waves (max factor)": max(factor_concern_waves.values(), default=0),
+                "Lowest factor": row["Lowest factor"],
+                "Lowest percentile": row["Lowest percentile"],
+                "≤20th percentile factors": row["≤20th percentile factors"],
+            }
+        )
+    out = pd.DataFrame(rows)
+    rank = {v: i for i, v in enumerate(LONGITUDINAL_ORDER)}
+    out["_rank"] = out["Longitudinal status"].map(rank).fillna(99)
+    out = out.sort_values(
+        ["_rank", "Current factors ≤5", "Current factors ≤20", "Concern waves (max factor)", "Lowest percentile"],
+        ascending=[True, False, False, False, True],
+    ).drop(columns="_rank")
+    return out
+
+def wave_transition_summary(history_df: pd.DataFrame, schema: Schema, factors: List[int] | None = None) -> pd.DataFrame:
+    factors = factors or list(schema.factor_cols.keys())
+    factor_cols = {n: schema.factor_cols[n] for n in factors}
+    dates = sorted(history_df["Wave key"].dropna().unique())
+    if len(dates) < 2:
+        return pd.DataFrame()
+    prev_date, current_date = dates[-2], dates[-1]
+    prev_df = history_df[history_df["Wave key"] == prev_date][["Student ID", *factor_cols.values()]].copy()
+    current_df = history_df[history_df["Wave key"] == current_date][["Student ID", *factor_cols.values()]].copy()
+    merged = current_df.merge(prev_df, on="Student ID", how="inner", suffixes=("_cur", "_prev"))
+    rows = []
+    for n, col in factor_cols.items():
+        cur = merged[f"{col}_cur"]
+        prev = merged[f"{col}_prev"]
+        rows.append(
+            {
+                "Factor": n,
+                "Factor name": FACTOR_NAMES[n],
+                "Persistent": int(((cur <= 20) & (prev <= 20)).sum()),
+                "New": int(((cur <= 20) & (prev > 20)).sum()),
+                "Recovered": int(((cur > 30) & (prev <= 20)).sum()),
+                "Watch deterioration": int(((cur <= 30) & (prev > 30)).sum()),
+                "Compared students": int(len(merged)),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def wave_factor_trend_for_chart(history_df: pd.DataFrame, schema: Schema, factors: List[int] | None = None) -> pd.DataFrame:
+    factors = factors or list(schema.factor_cols.keys())
+    rows = []
+    for wave in available_waves(history_df):
+        sub = history_df[history_df["Wave"] == wave]
+        for n in factors:
+            col = schema.factor_cols[n]
+            scores = sub.loc[sub["Completed PASS"], col].dropna()
+            total = len(scores)
+            if total == 0:
+                continue
+            rows.append(
+                {
+                    "Wave": wave,
+                    "Wave sort": sub["Wave key"].iloc[0],
+                    "Factor": n,
+                    "Factor name": FACTOR_NAMES[n],
+                    "Median percentile": float(scores.median()),
+                    "% ≤20": round(100 * (scores <= 20).sum() / total, 1),
+                    "% ≤5": round(100 * (scores <= 5).sum() / total, 1),
+                    "Completed": total,
+                }
+            )
+    return pd.DataFrame(rows)
