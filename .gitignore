@@ -1,0 +1,15 @@
+# Never commit pupil data
+*.xlsx
+*.xls
+*.csv
+*.tsv
+*.json
+
+# Python / Streamlit
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.streamlit/secrets.toml
+.DS_Store
