@@ -1,0 +1,44 @@
+name: Keep SLT longitudinal view high level
+
+on:
+  push:
+    paths:
+      - '.patch-slt-trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove named student table from SLT longitudinal view
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          text = p.read_text()
+          old = '''            st.dataframe(longi[longi["Longitudinal status"].isin(["New concern", "Persistent concern", "Chronic concern", "Recovered", "Watch deterioration"])], hide_index=True, use_container_width=True)'''
+          new = '''            strategic = longi[longi["Longitudinal status"].isin(["New concern", "Persistent concern", "Chronic concern", "Recovered", "Watch deterioration"])].copy()
+            slt_longitudinal = (
+                strategic.groupby(["Grade", "Longitudinal status"], dropna=False)
+                .size()
+                .reset_index(name="Students")
+                .sort_values(["Grade", "Students"], ascending=[True, False])
+            )
+            st.dataframe(slt_longitudinal, hide_index=True, use_container_width=True)
+            st.caption("The SLT longitudinal view deliberately stays at cohort level. Named students remain in the GL, HRT and specialist views.")'''
+          if old not in text:
+              raise SystemExit('Expected SLT longitudinal block was not found.')
+          p.write_text(text.replace(old, new, 1))
+          PY
+          python -m py_compile app.py pass_logic.py
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Keep SLT longitudinal analysis at cohort level"
+          git push
