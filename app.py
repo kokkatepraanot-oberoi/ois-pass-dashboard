@@ -151,14 +151,30 @@ def factor_chart(fs: pd.DataFrame, title: str) -> None:
 
 def attention_chart(summary: pd.DataFrame, group_col: str, title: str) -> None:
     if summary.empty:
+        st.info("No PASS records are available for this comparison.")
         return
+
+    attention_cols = ["Immediate review", "Targeted support", "Monitor", "Generally positive"]
+    required = [group_col, "Completed", *attention_cols]
+    missing = [col for col in required if col not in summary.columns]
+    if missing:
+        st.warning("This comparison could not be displayed because required summary fields are missing.")
+        return
+
+    # `attention_summary` already contains a total `Students` column. Pandas does
+    # not allow melt(value_name=...) to reuse an existing column name, so keep
+    # the melted count in a distinct field.
+    count_col = "Attention students"
     long = summary.melt(
         id_vars=[group_col, "Completed"],
-        value_vars=["Immediate review", "Targeted support", "Monitor", "Generally positive"],
+        value_vars=attention_cols,
         var_name="Attention",
-        value_name="Students",
+        value_name=count_col,
     )
-    long["Percent"] = long.apply(lambda r: 100 * r["Students"] / r["Completed"] if r["Completed"] else 0, axis=1)
+    completed = pd.to_numeric(long["Completed"], errors="coerce").fillna(0)
+    counts = pd.to_numeric(long[count_col], errors="coerce").fillna(0)
+    long["Percent"] = (100 * counts.div(completed.where(completed.ne(0)))).fillna(0)
+
     fig = px.bar(
         long,
         x=group_col,
