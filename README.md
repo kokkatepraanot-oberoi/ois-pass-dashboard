@@ -1,79 +1,106 @@
 # OIS Middle School PASS Dashboard
 
-A Streamlit dashboard that turns a Testwise **PASS (Pupil Attitudes to Self and School)** Excel export into five practical views:
+A Streamlit dashboard for turning Testwise **PASS (Pupil Attitudes to Self and School)** exports into practical leadership, pastoral and intervention workflows.
 
-- **SLT:** school-level patterns, grade/homeroom variation, completion and intervention load. Student names are not shown.
-- **Grade Level Leaders:** grade diagnosis, homeroom comparison, named student priorities and intervention planning.
-- **Homeroom Teachers:** homeroom overview, check-in queue and individual student profile.
-- **Learning Support:** learning-barrier patterns across F2, F3, F4, F6, F7 and F9, with a review queue and access-to-learning responses.
-- **Counsellors:** pastoral/relational patterns across F1, F3, F5, F7 and F8, with contextual review and conversation planning.
+The app has five permission-controlled views:
 
-## Why this design
+- **SLT:** school climate, longitudinal patterns, grade/homeroom variation and intervention priorities.
+- **Grade Level Leaders:** grade diagnosis, student journeys, homeroom comparison, named review queues and intervention planning.
+- **Homeroom Teachers:** own-homeroom picture, check-in queue, student journey and first-step interventions.
+- **Learning Support:** learning-barrier patterns across F2, F3, F4, F6, F7 and F9.
+- **Counsellors:** pastoral/relational patterns across F1, F3, F5, F7 and F8.
 
-PASS is most useful when it moves from data to a clear pastoral response. GL Assessment describes PASS analysis at whole-school/cohort/individual level and uses percentile bands to highlight students and cohorts that may need support.
+## PASS interpretation used
 
-This app uses the published PASS percentile interpretation:
+Published PASS percentile bands are used as the base:
 
-- 1st–5th percentile: low / immediate concern
-- 6th–20th percentile: low-moderate
-- 21st–30th percentile: moderate
-- 31st–100th percentile: high
+- **1st–5th percentile:** low / immediate concern
+- **6th–20th percentile:** low-moderate
+- **21st–30th percentile:** moderate
+- **31st–100th percentile:** high
 
-For day-to-day workflow, the app derives an **OIS attention status**:
+The dashboard derives an OIS workflow status:
 
-- **Immediate review:** any factor <= 5th percentile
+- **Immediate review:** any factor <=5
 - **Targeted support:** no factor <=5, but any factor <=20
 - **Monitor:** no factor <=20, but any factor is 21–30
 - **Generally positive:** all nine factors >=31
 
-This is **not an additional PASS score or diagnosis**. Staff should interpret the pattern across factors and triangulate it with attendance, attainment, behaviour, teacher observation and student voice.
+This is **not an additional PASS score or diagnosis**. Results must be triangulated with attendance, attainment, behaviour, teacher observation and student voice.
 
-## Nine PASS factors
+## Phase 1 — longitudinal analysis
 
-1. Feelings about school
-2. Perceived learning capability
-3. Self-regard as a learner
-4. Preparedness for learning
-5. Attitudes to teachers
-6. General work ethic
-7. Confidence in learning
-8. Attitudes to attendance
-9. Response to curriculum demands
+A multi-wave Testwise export unlocks analysis over time. Late completions close to the main administration are grouped into the same survey wave so they do not create artificial extra waves.
 
-The intervention suggestions in this repository are **OIS-created practical responses**, not copies of GL Assessment's proprietary PASS Intervention bank.
+The dashboard can now show:
 
-## Specialist views
+- school, grade and specialist factor trends across survey waves
+- latest-wave vs previous-wave movement
+- current student profiles alongside historical journeys
+- **New concern**
+- **Persistent concern**
+- **Chronic concern**
+- **Recovered**
+- **Watch deterioration**
+- **Stable positive**
 
-The **Learning Support** and **Counsellor** views use focused subsets of PASS factors to make review manageable. Their domain-specific "Immediate / Targeted / Monitor" labels are workflow aids only; they do not create a new PASS scale, identify SEND, diagnose mental-health needs, or constitute an automatic referral decision.
+Historical grade and homeroom labels in Testwise exports may reflect the student's **current** placement. For that reason, older results are presented as a **current cohort/student journey**, not as proof of the historical composition of a particular grade or homeroom.
 
-- Learning Support should triangulate PASS with attainment, work samples, teacher observation, language profile, screening and existing support plans.
-- Counsellors should triangulate PASS with student voice, pastoral history, attendance, behaviour and safeguarding information.
-- If a student conversation raises a safeguarding concern, staff should leave the PASS workflow and follow the school's safeguarding procedure.
+## Phase 2 — action workflow
 
-**Important access note:** the current role selector changes what the dashboard displays; it is **not role-based authentication**. Anyone with the shared app password can switch between views. Before broad staff rollout, use school-approved authentication/authorisation if different teams should have different data access.
+The app also includes:
+
+- Google Workspace login restricted to `@oberoi-is.org`
+- role-based permissions
+- HRT restriction to assigned homeroom(s)
+- GL restriction to assigned grade(s)
+- Learning Support and Counsellor specialist permissions
+- intervention trackers
+- HRT/GL action and review logs
+- CSV downloads
+- multi-sheet Excel analysis exports
+- safeguarding and interpretation guardrails
+
+The trackers/logs are currently **session-based**. Staff should download the CSV before leaving the session and use the school's approved systems for any detailed pastoral, counselling or safeguarding record.
+
+## Authentication and roles
+
+Google OIDC authentication uses Streamlit's `st.login()`, `st.user` and `st.logout()` workflow.
+
+The project owner account is retained as the initial dashboard administrator. All other roles should be configured in **Streamlit → Manage app → Settings → Secrets**. See `ROLE_CONFIGURATION.md` for the exact format.
+
+An authenticated OIS account with **no assigned role receives no PASS data**.
+
+For HRTs, if no explicit email mapping exists, the app can use a safe exact match between the Google display name and the 2026–27 HRT list built into the app.
+
+## Google OIDC secrets
+
+Keep these only in Streamlit Secrets, never in GitHub:
+
+```toml
+[auth]
+redirect_uri = "https://ois-pass.streamlit.app/oauth2callback"
+cookie_secret = "YOUR_RANDOM_SECRET"
+client_id = "YOUR_GOOGLE_CLIENT_ID"
+client_secret = "YOUR_GOOGLE_CLIENT_SECRET"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+```
+
+`Authlib` and `httpx` are included in `requirements.txt` because Streamlit's Google authentication flow requires them in the deployed environment.
 
 ## Data privacy
 
-PASS files contain sensitive pupil wellbeing/pastoral information.
+PASS files contain sensitive pupil pastoral/wellbeing information.
 
-- **Never commit a live PASS export to GitHub.** The `.gitignore` blocks common data file formats as an extra safeguard.
-- Prefer a **private repository**.
+- **Never commit a live PASS export to GitHub.**
+- The repository should be **Private** before wider school rollout.
 - Deploy only on a school-approved platform with appropriate access controls and data-processing arrangements.
-- The app does not deliberately write uploaded pupil data to disk, but the deployment host still processes the file in memory.
-- Set an `APP_PASSWORD` in Streamlit secrets before any deployment. The app now **fails closed** if the secret is missing; there is no unlocked mode.
-- Staff sign in with their name plus the shared school password. The staff name is stored only in the current Streamlit session.
-
-In Streamlit Community Cloud open **Manage app → Settings → Secrets** and add:
-
-```toml
-APP_PASSWORD = "replace-with-a-strong-school-managed-password"
-```
-
-Do **not** commit `.streamlit/secrets.toml` to GitHub.
+- Uploaded pupil data is processed in the current Streamlit session; it is not deliberately written to the repository.
+- Detailed counselling and safeguarding notes must remain in the school's approved record systems.
 
 ## 2026–27 Middle School homeroom teachers
 
-The dashboard maps the PASS homeroom code to the HRT named on the `Homeroom` sheet of **Homeroom and Secondary Staff Data (A.Y. 2026- 2027)**. The separate `HRT` summary tab contains conflicting allocations, so the direct `Homeroom` sheet pairing is used for the dashboard.
+The dashboard uses the direct homeroom allocation from the `Homeroom` sheet in **Homeroom and Secondary Staff Data (A.Y. 2026- 2027)**.
 
 | Homeroom | HRT |
 |---|---|
@@ -101,8 +128,6 @@ The dashboard maps the PASS homeroom code to the HRT named on the `Homeroom` she
 | 8.6 | Dhanisha Benoy |
 | 8.7 | Neha Basak |
 
-The HRT view displays the teacher beside the homeroom code and automatically preselects the signed-in teacher's homeroom when the entered staff name exactly matches this mapping.
-
 ## Run locally
 
 ```bash
@@ -112,34 +137,31 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Then upload the Testwise PASS Excel export. The app looks for a sheet named `StudentData`; if it is not present, it uses the first sheet.
+The app looks for a sheet named `StudentData`; if it is not present, it uses the first sheet.
 
-## Expected Testwise fields
-
-Core fields:
+Core Testwise fields are:
 
 - `Forename`
 - `Surname`
 - `Current Year`
 - `Group`
+- `PASS - Date of Survey` for longitudinal analysis
+- `TW Unique ID` for reliable student matching over time
 - `PASS - Factor 1 - Percentile` through `PASS - Factor 9 - Percentile`
-
-Other fields can be present and are retained. The SLT subgroup view only offers fields that contain meaningful variation.
 
 ## Recommended operating rhythm
 
-1. **SLT:** identify 2–3 school/grade priorities, not dozens of actions.
-2. **GL:** review Immediate students first, assign Targeted cases, and decide no more than two grade-wide responses.
-3. **HRT:** complete student check-ins and use the individual factor profile to frame the conversation.
-4. **Learning Support:** review multiple learning-related concerns against attainment and classroom evidence before assigning support.
-5. **Counsellors:** use pastoral PASS patterns to prioritise contextual review and check-ins, not automatic counselling referrals.
-6. **Review after 3–4 weeks** using real evidence (attendance, work completion, behaviour, student voice), rather than waiting for the next PASS survey.
-7. Re-administer PASS later in the year if that fits the school's assessment cycle; GL notes that many secondary schools use a second administration at least 12 weeks after the first.
+1. **SLT:** select 2–3 systemic priorities, not a long list of actions.
+2. **GL:** review new/persistent/chronic concerns, assign ownership and choose no more than two grade-wide responses.
+3. **HRT:** complete targeted student check-ins using the factor profile and journey as context.
+4. **Learning Support/Counsellors:** use specialist queues for contextual review, not automatic referral.
+5. **Review after 3–4 weeks** using attendance, work completion, behaviour, attainment and student voice.
+6. Use the next PASS administration to review whether concerns have improved, persisted or newly emerged.
 
 ## Official PASS references
 
 - GL Assessment PASS overview: https://www.gl-assessment.co.uk/products/pass/
-- PASS attitudinal factor definitions: https://support.gl-assessment.co.uk/knowledge-base/assessments/pass-support/general-information/attitudinal-factors
-- Understanding PASS data and percentile bands: https://support.gl-assessment.co.uk/knowledge-base/assessments/pass-support/after-the-test/understanding-your-data
+- PASS factor definitions: https://support.gl-assessment.co.uk/knowledge-base/assessments/pass-support/general-information/attitudinal-factors
+- Understanding PASS data: https://support.gl-assessment.co.uk/knowledge-base/assessments/pass-support/after-the-test/understanding-your-data
 - PASS quick data guide: https://support.gl-assessment.co.uk/knowledge-base/assessments/pass-support/after-the-test/quick-data-guide
-- PASS interventions overview: https://support.gl-assessment.co.uk/knowledge-base/assessments/pass-support/after-the-test/pass-interventions
+- PASS interventions: https://support.gl-assessment.co.uk/knowledge-base/assessments/pass-support/after-the-test/pass-interventions
