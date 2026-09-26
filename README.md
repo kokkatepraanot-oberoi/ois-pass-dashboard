@@ -60,13 +60,48 @@ PASS files contain sensitive pupil wellbeing/pastoral information.
 - Prefer a **private repository**.
 - Deploy only on a school-approved platform with appropriate access controls and data-processing arrangements.
 - The app does not deliberately write uploaded pupil data to disk, but the deployment host still processes the file in memory.
-- Set an `APP_PASSWORD` in Streamlit secrets before any wider deployment.
+- Set an `APP_PASSWORD` in Streamlit secrets before any deployment. The app now **fails closed** if the secret is missing; there is no unlocked mode.
+- Staff sign in with their name plus the shared school password. The staff name is stored only in the current Streamlit session.
 
-Example `.streamlit/secrets.toml` (do **not** commit this file):
+In Streamlit Community Cloud open **Manage app → Settings → Secrets** and add:
 
 ```toml
-APP_PASSWORD = "use-a-strong-school-managed-password"
+APP_PASSWORD = "replace-with-a-strong-school-managed-password"
 ```
+
+Do **not** commit `.streamlit/secrets.toml` to GitHub.
+
+## 2026–27 Middle School homeroom teachers
+
+The dashboard maps the PASS homeroom code to the HRT named on the `Homeroom` sheet of **Homeroom and Secondary Staff Data (A.Y. 2026- 2027)**. The separate `HRT` summary tab contains conflicting allocations, so the direct `Homeroom` sheet pairing is used for the dashboard.
+
+| Homeroom | HRT |
+|---|---|
+| 6.1 | Shruti Uniyal |
+| 6.2 | Jigna Doshi |
+| 6.3 | Neha Kapadia |
+| 6.4 | Sneha Sundrani |
+| 6.5 | Debduti Ray |
+| 6.6 | Ursula Sanghvi |
+| 6.7 | Prathamesh Cheulkar |
+| 6.8 | Ramprasad Iyengar |
+| 7.1 | Pradeep Singh |
+| 7.2 | Aashana Musle |
+| 7.3 | Manasi Bhingarde |
+| 7.4 | Pallavi Rajguru |
+| 7.5 | Vaishnavi Bapardekar |
+| 7.6 | Roshan Chavan |
+| 7.7 | Antara Roy |
+| 7.8 | Rohit Kumar |
+| 8.1 | Vanita Amin |
+| 8.2 | Swapnil Shetty |
+| 8.3 | Lata Dalvi |
+| 8.4 | Mamta Pasi |
+| 8.5 | Ashwin Subramanian |
+| 8.6 | Dhanisha Benoy |
+| 8.7 | Neha Basak |
+
+The HRT view displays the teacher beside the homeroom code and automatically preselects the signed-in teacher's homeroom when the entered staff name exactly matches this mapping.
 
 ## Run locally
 
