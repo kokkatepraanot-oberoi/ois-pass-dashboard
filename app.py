@@ -92,31 +92,44 @@ st.markdown(
 )
 
 
-def password_gate() -> None:
-    expected = st.secrets.get("APP_PASSWORD", "")
-    if not expected:
+ALLOWED_GOOGLE_DOMAIN = "oberoi-is.org"
+
+
+def google_auth_gate() -> None:
+    auth_config = st.secrets.get("auth", {})
+    if not auth_config:
         st.title("OIS Middle School PASS Dashboard")
-        st.error("Staff access is not configured yet. An administrator must set APP_PASSWORD in the Streamlit app secrets before anyone can use the dashboard.")
-        st.caption("The dashboard now fails closed: there is no unlocked mode when APP_PASSWORD is missing.")
+        st.error("School Google sign-in is not configured yet. An administrator must add the Google OIDC settings to the Streamlit app secrets.")
+        st.caption("The dashboard fails closed until Google authentication is configured.")
         st.stop()
 
-    if st.session_state.get("pass_authenticated"):
-        return
+    if not st.user.is_logged_in:
+        st.title("OIS Middle School PASS Dashboard")
+        st.caption("Authorised OIS staff only")
+        st.write("Sign in with your **@oberoi-is.org** Google Workspace account.")
+        st.button("Sign in with school Google", on_click=st.login, type="primary")
+        st.stop()
 
-    st.title("OIS Middle School PASS Dashboard")
-    st.caption("Authorised OIS staff only")
-    staff_name = st.text_input("Staff name")
-    entered = st.text_input("Password", type="password")
-    if st.button("Sign in", type="primary"):
-        if not staff_name.strip():
-            st.error("Enter your name before signing in.")
-        elif entered == expected:
-            st.session_state["pass_authenticated"] = True
-            st.session_state["staff_name"] = staff_name.strip()
-            st.rerun()
-        else:
-            st.error("Incorrect password.")
-    st.stop()
+    identity = st.user.to_dict()
+    email = str(identity.get("email", "")).strip().lower()
+    name = str(identity.get("name", "")).strip() or email.split("@")[0]
+
+    if identity.get("email_verified") is False:
+        st.title("OIS Middle School PASS Dashboard")
+        st.error("Google did not return a verified email address for this account.")
+        st.button("Sign out", on_click=st.logout)
+        st.stop()
+
+    if not email.endswith(f"@{ALLOWED_GOOGLE_DOMAIN}"):
+        st.title("OIS Middle School PASS Dashboard")
+        st.error("Access is restricted to OIS school Google accounts (@oberoi-is.org).")
+        if email:
+            st.caption(f"Signed in as {email}")
+        st.button("Sign out and use school account", on_click=st.logout, type="primary")
+        st.stop()
+
+    st.session_state["staff_name"] = name
+    st.session_state["staff_email"] = email
 
 
 def interpretation_note() -> None:
@@ -715,17 +728,15 @@ def render_hrt(df: pd.DataFrame, schema) -> None:
         show_student_profile(sub, schema, "hrt")
 
 
-password_gate()
+google_auth_gate()
 
 st.title("OIS Middle School PASS Dashboard")
 st.caption("Pupil Attitudes to Self and School | Middle School pastoral analysis and intervention planning")
 
 with st.sidebar:
     st.caption(f"Signed in as **{st.session_state.get('staff_name', 'OIS staff')}**")
-    if st.button("Log out", use_container_width=True):
-        st.session_state.pop("pass_authenticated", None)
-        st.session_state.pop("staff_name", None)
-        st.rerun()
+    st.caption(st.session_state.get("staff_email", ""))
+    st.button("Log out", on_click=st.logout, use_container_width=True)
     st.divider()
     st.header("1. Load PASS data")
     uploaded = st.file_uploader("Upload Testwise PASS Excel export", type=["xlsx"])
@@ -763,7 +774,7 @@ with st.sidebar:
         ["SLT", "Grade Level Leader", "Homeroom Teacher", "Learning Support", "Counsellor"],
         index=0,
     )
-    st.caption("The role selector changes the analysis view; it is not role-based access control. Everyone with the current app password can switch views.")
+    st.caption("The role selector changes the analysis view; it is not role-based access control. Google sign-in secures access to OIS staff accounts. Role-based permissions are still separate from authentication, so authorised users can currently switch views.")
     st.divider()
     interpretation_note()
     st.caption("PASS is a pastoral screening/attitudinal tool. It should be triangulated with other evidence and must not be treated as a clinical or safeguarding diagnosis.")
