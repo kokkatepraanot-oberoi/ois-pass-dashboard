@@ -2,7 +2,8 @@ name: Migrate PASS dashboard to school Google login
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - .github/workflows/google-auth-migration.yml
 
@@ -14,109 +15,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Replace shared password with Google OIDC
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
+          import base64
           import re
-
-          path = Path('app.py')
-          text = path.read_text()
-
-          new_gate = '''ALLOWED_GOOGLE_DOMAIN = "oberoi-is.org"
-
-
-def google_auth_gate() -> None:
-    auth_config = st.secrets.get("auth", {})
-    if not auth_config:
-        st.title("OIS Middle School PASS Dashboard")
-        st.error("School Google sign-in is not configured yet. An administrator must add the Google OIDC settings to the Streamlit app secrets.")
-        st.caption("The dashboard fails closed until Google authentication is configured.")
-        st.stop()
-
-    if not st.user.is_logged_in:
-        st.title("OIS Middle School PASS Dashboard")
-        st.caption("Authorised OIS staff only")
-        st.write("Sign in with your **@oberoi-is.org** Google Workspace account.")
-        st.button("Sign in with school Google", on_click=st.login, type="primary")
-        st.stop()
-
-    identity = st.user.to_dict()
-    email = str(identity.get("email", "")).strip().lower()
-    name = str(identity.get("name", "")).strip() or email.split("@")[0]
-
-    if identity.get("email_verified") is False:
-        st.title("OIS Middle School PASS Dashboard")
-        st.error("Google did not return a verified email address for this account.")
-        st.button("Sign out", on_click=st.logout)
-        st.stop()
-
-    if not email.endswith(f"@{ALLOWED_GOOGLE_DOMAIN}"):
-        st.title("OIS Middle School PASS Dashboard")
-        st.error("Access is restricted to OIS school Google accounts (@oberoi-is.org).")
-        if email:
-            st.caption(f"Signed in as {email}")
-        st.button("Sign out and use school account", on_click=st.logout, type="primary")
-        st.stop()
-
-    st.session_state["staff_name"] = name
-    st.session_state["staff_email"] = email
-'''
-
+          gate = base64.b64decode('QUxMT1dFRF9HT09HTEVfRE9NQUlOID0gIm9iZXJvaS1pcy5vcmciCgoKZGVmIGdvb2dsZV9hdXRoX2dhdGUoKSAtPiBOb25lOgogICAgYXV0aF9jb25maWcgPSBzdC5zZWNyZXRzLmdldCgiYXV0aCIsIHt9KQogICAgaWYgbm90IGF1dGhfY29uZmlnOgogICAgICAgIHN0LnRpdGxlKCJPSVMgTWlkZGxlIFNjaG9vbCBQQVNTIERhc2hib2FyZCIpCiAgICAgICAgc3QuZXJyb3IoIlNjaG9vbCBHb29nbGUgc2lnbi1pbiBpcyBub3QgY29uZmlndXJlZCB5ZXQuIEFuIGFkbWluaXN0cmF0b3IgbXVzdCBhZGQgdGhlIEdvb2dsZSBPSURDIHNldHRpbmdzIHRvIHRoZSBTdHJlYW1saXQgYXBwIHNlY3JldHMuIikKICAgICAgICBzdC5jYXB0aW9uKCJUaGUgZGFzaGJvYXJkIGZhaWxzIGNsb3NlZCB1bnRpbCBHb29nbGUgYXV0aGVudGljYXRpb24gaXMgY29uZmlndXJlZC4iKQogICAgICAgIHN0LnN0b3AoKQoKICAgIGlmIG5vdCBzdC51c2VyLmlzX2xvZ2dlZF9pbjoKICAgICAgICBzdC50aXRsZSgiT0lTIE1pZGRsZSBTY2hvb2wgUEFTUyBEYXNoYm9hcmQiKQogICAgICAgIHN0LmNhcHRpb24oIkF1dGhvcmlzZWQgT0lTIHN0YWZmIG9ubHkiKQogICAgICAgIHN0LndyaXRlKCJTaWduIGluIHdpdGggeW91ciAqKkBvYmVyb2ktaXMub3JnKiogR29vZ2xlIFdvcmtzcGFjZSBhY2NvdW50LiIpCiAgICAgICAgc3QuYnV0dG9uKCJTaWduIGluIHdpdGggc2Nob29sIEdvb2dsZSIsIG9uX2NsaWNrPXN0LmxvZ2luLCB0eXBlPSJwcmltYXJ5IikKICAgICAgICBzdC5zdG9wKCkKCiAgICBpZGVudGl0eSA9IHN0LnVzZXIudG9fZGljdCgpCiAgICBlbWFpbCA9IHN0cihpZGVudGl0eS5nZXQoImVtYWlsIiwgIiIpKS5zdHJpcCgpLmxvd2VyKCkKICAgIG5hbWUgPSBzdHIoaWRlbnRpdHkuZ2V0KCJuYW1lIiwgIiIpKS5zdHJpcCgpIG9yIGVtYWlsLnNwbGl0KCJAIilbMF0KCiAgICBpZiBpZGVudGl0eS5nZXQoImVtYWlsX3ZlcmlmaWVkIikgaXMgRmFsc2U6CiAgICAgICAgc3QudGl0bGUoIk9JUyBNaWRkbGUgU2Nob29sIFBBU1MgRGFzaGJvYXJkIikKICAgICAgICBzdC5lcnJvcigiR29vZ2xlIGRpZCBub3QgcmV0dXJuIGEgdmVyaWZpZWQgZW1haWwgYWRkcmVzcyBmb3IgdGhpcyBhY2NvdW50LiIpCiAgICAgICAgc3QuYnV0dG9uKCJTaWduIG91dCIsIG9uX2NsaWNrPXN0LmxvZ291dCkKICAgICAgICBzdC5zdG9wKCkKCiAgICBpZiBub3QgZW1haWwuZW5kc3dpdGgoZiJAe0FMTE9XRURfR09PR0xFX0RPTUFJTn0iKToKICAgICAgICBzdC50aXRsZSgiT0lTIE1pZGRsZSBTY2hvb2wgUEFTUyBEYXNoYm9hcmQiKQogICAgICAgIHN0LmVycm9yKCJBY2Nlc3MgaXMgcmVzdHJpY3RlZCB0byBPSVMgc2Nob29sIEdvb2dsZSBhY2NvdW50cyAoQG9iZXJvaS1pcy5vcmcpLiIpCiAgICAgICAgaWYgZW1haWw6CiAgICAgICAgICAgIHN0LmNhcHRpb24oZiJTaWduZWQgaW4gYXMge2VtYWlsfSIpCiAgICAgICAgc3QuYnV0dG9uKCJTaWduIG91dCBhbmQgdXNlIHNjaG9vbCBhY2NvdW50Iiwgb25fY2xpY2s9c3QubG9nb3V0LCB0eXBlPSJwcmltYXJ5IikKICAgICAgICBzdC5zdG9wKCkKCiAgICBzdC5zZXNzaW9uX3N0YXRlWyJzdGFmZl9uYW1lIl0gPSBuYW1lCiAgICBzdC5zZXNzaW9uX3N0YXRlWyJzdGFmZl9lbWFpbCJdID0gZW1haWwK').decode()
+          p = Path('app.py')
+          text = p.read_text()
           pattern = r'def password_gate\(\) -> None:\n.*?\n\ndef interpretation_note\(\) -> None:'
-          replacement = new_gate + '\n\ndef interpretation_note() -> None:'
-          text, n = re.subn(pattern, replacement, text, count=1, flags=re.S)
-          if n != 1:
+          text, count = re.subn(pattern, gate + '\n\ndef interpretation_note() -> None:', text, count=1, flags=re.S)
+          if count != 1:
               raise SystemExit('Could not replace password_gate')
-
           text = text.replace('password_gate()\n\nst.title(', 'google_auth_gate()\n\nst.title(', 1)
-
-          old_sidebar = '''with st.sidebar:
-    st.caption(f"Signed in as **{st.session_state.get('staff_name', 'OIS staff')}**")
-    if st.button("Log out", use_container_width=True):
-        st.session_state.pop("pass_authenticated", None)
-        st.session_state.pop("staff_name", None)
-        st.rerun()
-    st.divider()
-'''
-          new_sidebar = '''with st.sidebar:
-    st.caption(f"Signed in as **{st.session_state.get('staff_name', 'OIS staff')}**")
-    st.caption(st.session_state.get("staff_email", ""))
-    st.button("Log out", on_click=st.logout, use_container_width=True)
-    st.divider()
-'''
-          if old_sidebar not in text:
+          old = 'with st.sidebar:\n    st.caption(f"Signed in as **{st.session_state.get(\'staff_name\', \'OIS staff\')}**")\n    if st.button("Log out", use_container_width=True):\n        st.session_state.pop("pass_authenticated", None)\n        st.session_state.pop("staff_name", None)\n        st.rerun()\n    st.divider()\n'
+          new = 'with st.sidebar:\n    st.caption(f"Signed in as **{st.session_state.get(\'staff_name\', \'OIS staff\')}**")\n    st.caption(st.session_state.get("staff_email", ""))\n    st.button("Log out", on_click=st.logout, use_container_width=True)\n    st.divider()\n'
+          if old not in text:
               raise SystemExit('Could not replace sidebar logout block')
-          text = text.replace(old_sidebar, new_sidebar, 1)
-
-          text = text.replace(
-              'The role selector changes the analysis view; it is not role-based access control. Everyone with the current app password can switch views.',
-              'The role selector changes the analysis view; it is not role-based access control. Google sign-in secures access to OIS staff accounts. Role-based permissions are still separate from authentication, so authorised users can currently switch views.',
-              1,
-          )
-
-          path.write_text(text)
-
-          Path('requirements.txt').write_text(
-              'streamlit>=1.42,<2\n'
-              'pandas>=2.2,<3\n'
-              'openpyxl>=3.1,<4\n'
-              'plotly>=5.24,<7\n'
-              'Authlib>=1.3.2,<2\n'
-          )
+          text = text.replace(old, new, 1)
+          text = text.replace('The role selector changes the analysis view; it is not role-based access control. Everyone with the current app password can switch views.', 'The role selector changes the analysis view; it is not role-based access control. Google sign-in secures access to OIS staff accounts. Role-based permissions are still separate from authentication, so authorised users can currently switch views.', 1)
+          p.write_text(text)
+          Path('requirements.txt').write_text('streamlit>=1.42,<2\npandas>=2.2,<3\nopenpyxl>=3.1,<4\nplotly>=5.24,<7\nAuthlib>=1.3.2,<2\n')
           PY
-
       - name: Verify Python syntax
         run: python -m py_compile app.py pass_logic.py
-
       - name: Commit migration
         shell: bash
         run: |
           rm .github/workflows/google-auth-migration.yml
           git config user.name "OIS PASS Dashboard Automation"
           git config user.email "praanot.kokkate@oberoi-is.org"
-          git add app.py requirements.txt .github/workflows/google-auth-migration.yml
+          git add -A
           git commit -m "Use OIS Google Workspace login"
           git push
