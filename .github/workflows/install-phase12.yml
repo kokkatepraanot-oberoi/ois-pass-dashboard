@@ -3,7 +3,7 @@ name: Install PASS Phase 1 and 2
 on:
   push:
     paths:
-      - '.upgrade2/trigger'
+      - '.upgrade2/trigger2'
   workflow_dispatch:
 
 permissions:
@@ -24,13 +24,18 @@ jobs:
           import pathlib
           import zlib
 
-          files = [
-              ('.upgrade2/app.py.z.b64', 'app.py'),
-              ('.upgrade2/pass_logic.py.z.b64', 'pass_logic.py'),
-          ]
-          for src, dst in files:
-              payload = pathlib.Path(src).read_text().strip()
-              pathlib.Path(dst).write_bytes(zlib.decompress(base64.b64decode(payload)))
+          app_payload = ''.join(
+              pathlib.Path(f'.upgrade2/app.part{i}.b64').read_text().strip()
+              for i in range(4)
+          )
+          pathlib.Path('app.py').write_bytes(
+              zlib.decompress(base64.b64decode(app_payload))
+          )
+
+          logic_payload = pathlib.Path('.upgrade2/pass_logic.py.z.b64').read_text().strip()
+          pathlib.Path('pass_logic.py').write_bytes(
+              zlib.decompress(base64.b64decode(logic_payload))
+          )
           PY
           python -m py_compile app.py pass_logic.py
 
