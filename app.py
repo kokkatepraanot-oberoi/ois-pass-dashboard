@@ -45,6 +45,11 @@ BAND_COLOURS = {
     "High": "#178344",
 }
 
+# Specialist views deliberately focus on the PASS factors most relevant to each team's remit.
+# These are screening lenses, not diagnostic scales or automatic referral rules.
+LEARNING_SUPPORT_FACTORS = [2, 3, 4, 6, 7, 9]
+COUNSELLOR_FACTORS = [1, 3, 5, 7, 8]
+
 
 st.markdown(
     """
@@ -286,6 +291,268 @@ def subgroup_options(df: pd.DataFrame) -> list[str]:
     return available
 
 
+def specialist_factor_summary(df: pd.DataFrame, schema, factors: list[int]) -> pd.DataFrame:
+    fs = factor_summary(df, schema)
+    if fs.empty:
+        return fs
+    order = {factor: i for i, factor in enumerate(factors)}
+    fs = fs[fs["Factor"].isin(factors)].copy()
+    fs["_order"] = fs["Factor"].map(order)
+    return fs.sort_values("_order").drop(columns="_order")
+
+
+def specialist_working_data(df: pd.DataFrame, schema, factors: list[int]) -> pd.DataFrame:
+    """Create a domain-specific PASS review status without changing the official PASS data."""
+    out = df.copy()
+    factor_cols = {n: schema.factor_cols[n] for n in factors}
+    cols = list(factor_cols.values())
+
+    completed = out["Completed PASS"].fillna(False).astype(bool)
+    scores = out[cols]
+    out["Domain immediate count"] = ((scores <= 5).sum(axis=1)).where(completed, 0).astype(int)
+    out["Domain concern count"] = ((scores <= 20).sum(axis=1)).where(completed, 0).astype(int)
+    out["Domain moderate count"] = (((scores >= 21) & (scores <= 30)).sum(axis=1)).where(completed, 0).astype(int)
+    out["Domain lowest percentile"] = scores.min(axis=1, skipna=True)
+
+    def domain_status(row) -> str:
+        if not bool(row["Completed PASS"]):
+            return "Not completed"
+        vals = row[cols]
+        if (vals <= 5).any():
+            return "Immediate review"
+        if (vals <= 20).any():
+            return "Targeted support"
+        if (vals <= 30).any():
+            return "Monitor"
+        return "Generally positive"
+
+    def lowest_factor(row) -> str:
+        values = {n: row[col] for n, col in factor_cols.items() if not pd.isna(row[col])}
+        if not values:
+            return ""
+        n = min(values, key=values.get)
+        return f"F{n} {FACTOR_NAMES[n]}"
+
+    def concern_factors(row, threshold: float) -> str:
+        found = []
+        for n, col in factor_cols.items():
+            value = row[col]
+            if not pd.isna(value) and float(value) <= threshold:
+                found.append(f"F{n} {FACTOR_NAMES[n]}")
+        return "; ".join(found)
+
+    out["Domain attention"] = out.apply(domain_status, axis=1)
+    out["Domain lowest factor"] = out.apply(lowest_factor, axis=1)
+    out["Domain factors ≤20"] = out.apply(lambda row: concern_factors(row, 20), axis=1)
+    out["Domain factors ≤5"] = out.apply(lambda row: concern_factors(row, 5), axis=1)
+    return out
+
+
+def specialist_attention_summary(df: pd.DataFrame, schema, factors: list[int], group_col: str) -> pd.DataFrame:
+    working = specialist_working_data(df, schema, factors)
+    working = working.copy()
+    working["Attention"] = working["Domain attention"]
+    return attention_summary(working, group_col)
+
+
+def specialist_priority_table(df: pd.DataFrame, schema, factors: list[int]) -> pd.DataFrame:
+    working = specialist_working_data(df, schema, factors)
+    display = working[[
+        "Student",
+        "Grade",
+        "Homeroom",
+        "Domain attention",
+        "Domain immediate count",
+        "Domain concern count",
+        "Domain moderate count",
+        "Domain lowest factor",
+        "Domain lowest percentile",
+        "Domain factors ≤5",
+        "Domain factors ≤20",
+        "Attention",
+    ]].copy()
+    display = display.rename(columns={
+        "Domain attention": "Specialist review",
+        "Domain immediate count": "Factors ≤5",
+        "Domain concern count": "Factors ≤20",
+        "Domain moderate count": "Factors 21–30",
+        "Domain lowest factor": "Lowest relevant factor",
+        "Domain lowest percentile": "Lowest relevant percentile",
+        "Domain factors ≤5": "Relevant factors ≤5",
+        "Domain factors ≤20": "Relevant factors ≤20",
+        "Attention": "Overall PASS attention",
+    })
+    rank = {label: i for i, label in enumerate(ATTENTION_ORDER)}
+    display["_rank"] = display["Specialist review"].map(rank).fillna(99)
+    display = display.sort_values(
+        ["_rank", "Factors ≤5", "Factors ≤20", "Factors 21–30", "Lowest relevant percentile"],
+        ascending=[True, False, False, False, True],
+    ).drop(columns="_rank")
+    return display
+
+
+def specialist_status_strip(df: pd.DataFrame, schema, factors: list[int], label: str) -> None:
+    working = specialist_working_data(df, schema, factors)
+    total = len(working)
+    completed = int(working["Completed PASS"].sum())
+    status = working["Domain attention"].astype(str)
+    immediate = int((status == "Immediate review").sum())
+    targeted = int((status == "Targeted support").sum())
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Students", total)
+    c2.metric("PASS completed", f"{completed} ({100*completed/total:.1f}%)" if total else "0")
+    c3.metric(f"{label} immediate", immediate)
+    c4.metric(f"{label} targeted", targeted)
+
+
+def show_specialist_action_cards(
+    context_df: pd.DataFrame,
+    schema,
+    factors: list[int],
+    heading: str,
+    universal_heading: str,
+) -> None:
+    st.subheader(heading)
+    fs = specialist_factor_summary(context_df, schema, factors)
+    if fs.empty:
+        st.info("No completed PASS records in this selection.")
+        return
+    top = fs.sort_values(["% ≤20", "% ≤5"], ascending=False).head(3)
+    for index, (_, row) in enumerate(top.iterrows()):
+        n = int(row["Factor"])
+        item = INTERVENTIONS[n]
+        with st.expander(
+            f"F{n} – {FACTOR_NAMES[n]} | {float(row['% ≤20']):.1f}% at/under 20th percentile",
+            expanded=index == 0,
+        ):
+            st.write(FACTOR_DESCRIPTIONS[n])
+            left, right = st.columns(2)
+            with left:
+                st.markdown(f"**{universal_heading}**")
+                for action in item["universal"]:
+                    st.markdown(f"- {action}")
+            with right:
+                st.markdown("**Targeted response**")
+                for action in item["targeted"]:
+                    st.markdown(f"- {action}")
+            st.markdown("**Useful student questions**")
+            for question in item["questions"]:
+                st.markdown(f"- {question}")
+
+
+def specialist_scope(df: pd.DataFrame, key: str) -> tuple[pd.DataFrame, str, bool]:
+    grades = sorted(df["Grade"].dropna().astype(str).unique().tolist())
+    choice = st.selectbox("Scope", ["Whole Middle School", *grades], key=key)
+    if choice == "Whole Middle School":
+        return df.copy(), choice, True
+    return df[df["Grade"] == choice].copy(), choice, False
+
+
+def render_learning_support(df: pd.DataFrame, schema) -> None:
+    st.header("Learning Support view — identify learning barriers and coordinate support")
+    st.markdown(
+        '<div class="ois-callout"><b>Use PASS to identify patterns that may be affecting access to learning.</b> '
+        'This view focuses on learner capability, self-regard, preparedness, work ethic, confidence and curriculum demands. '
+        'A low PASS score does not identify SEND or a specific learning difficulty.</div>',
+        unsafe_allow_html=True,
+    )
+    sub, scope_label, whole_school = specialist_scope(df, "ls_scope")
+    specialist_status_strip(sub, schema, LEARNING_SUPPORT_FACTORS, "LS")
+
+    tabs = st.tabs(["Learning profile", "Cohort patterns", "Student review queue", "Support planner", "Student explorer"])
+
+    with tabs[0]:
+        fs = specialist_factor_summary(sub, schema, LEARNING_SUPPORT_FACTORS)
+        factor_chart(fs, f"{scope_label}: learning-support PASS factors")
+        factor_table(fs)
+        st.caption("Learning Support lens: F2, F3, F4, F6, F7 and F9. Triangulate with attainment, work samples, teacher observation, screening and existing support plans.")
+
+    with tabs[1]:
+        group_col = "Grade" if whole_school else "Homeroom"
+        summary = specialist_attention_summary(sub, schema, LEARNING_SUPPORT_FACTORS, group_col)
+        attention_chart(summary, group_col, f"{scope_label}: learning-support review profile by {group_col.lower()}")
+        st.dataframe(summary, hide_index=True, use_container_width=True)
+
+    with tabs[2]:
+        priorities = specialist_priority_table(sub, schema, LEARNING_SUPPORT_FACTORS)
+        queue = priorities[priorities["Specialist review"].isin(["Immediate review", "Targeted support", "Monitor"])].copy()
+        st.dataframe(queue, hide_index=True, use_container_width=True)
+        downloadable_csv(queue, "Download Learning Support review queue", "pass_learning_support_review_queue.csv", "ls_students_dl")
+        st.info("This is a review queue, not an automatic Learning Support referral list. Check whether the pattern is explained by curriculum fit, organisation, confidence, attendance, language, prior attainment or an already-known learning need before assigning support.")
+
+    with tabs[3]:
+        show_specialist_action_cards(
+            sub,
+            schema,
+            LEARNING_SUPPORT_FACTORS,
+            f"{scope_label}: Learning Support priorities",
+            "Classroom / access response",
+        )
+        st.markdown(
+            "**Suggested Learning Support workflow**  \n"
+            "1. Start with students showing multiple relevant factors at/under the 20th percentile.  \n"
+            "2. Compare PASS with attainment, work completion, teacher evidence and existing LS records.  \n"
+            "3. Agree one measurable access-to-learning intervention before adding multiple supports.  \n"
+            "4. Review evidence after 3–4 weeks and adjust only if the intervention is not working."
+        )
+
+    with tabs[4]:
+        show_student_profile(sub, schema, "ls")
+
+
+def render_counsellor(df: pd.DataFrame, schema) -> None:
+    st.header("Counsellor view — pastoral patterns, check-in triage and student context")
+    st.markdown(
+        '<div class="ois-callout"><b>Use PASS as an additional pastoral signal, not as a mental-health or risk assessment.</b> '
+        'This view focuses on feelings about school, learner self-regard, relationships with teachers, confidence and attendance. '
+        'Students should not be referred to counselling solely because of a PASS percentile.</div>',
+        unsafe_allow_html=True,
+    )
+    sub, scope_label, whole_school = specialist_scope(df, "counsellor_scope")
+    specialist_status_strip(sub, schema, COUNSELLOR_FACTORS, "Pastoral")
+
+    tabs = st.tabs(["Pastoral profile", "Cohort patterns", "Counsellor review queue", "Conversation planner", "Student explorer"])
+
+    with tabs[0]:
+        fs = specialist_factor_summary(sub, schema, COUNSELLOR_FACTORS)
+        factor_chart(fs, f"{scope_label}: pastoral PASS factors")
+        factor_table(fs)
+        st.caption("Counsellor lens: F1, F3, F5, F7 and F8. Read these alongside known pastoral history, attendance, student voice, behaviour and current safeguarding information.")
+
+    with tabs[1]:
+        group_col = "Grade" if whole_school else "Homeroom"
+        summary = specialist_attention_summary(sub, schema, COUNSELLOR_FACTORS, group_col)
+        attention_chart(summary, group_col, f"{scope_label}: pastoral review profile by {group_col.lower()}")
+        st.dataframe(summary, hide_index=True, use_container_width=True)
+
+    with tabs[2]:
+        priorities = specialist_priority_table(sub, schema, COUNSELLOR_FACTORS)
+        queue = priorities[priorities["Specialist review"].isin(["Immediate review", "Targeted support", "Monitor"])].copy()
+        st.dataframe(queue, hide_index=True, use_container_width=True)
+        downloadable_csv(queue, "Download counsellor review queue", "pass_counsellor_review_queue.csv", "counsellor_students_dl")
+        st.warning("A low pastoral PASS factor does not indicate a mental-health condition, self-harm risk or safeguarding risk. Use the queue to identify who merits contextual review or a check-in; follow existing referral and safeguarding procedures when other evidence warrants it.")
+
+    with tabs[3]:
+        show_specialist_action_cards(
+            sub,
+            schema,
+            COUNSELLOR_FACTORS,
+            f"{scope_label}: pastoral conversation priorities",
+            "Universal pastoral response",
+        )
+        st.markdown(
+            "**Suggested counsellor workflow**  \n"
+            "1. Check whether students are already known to counselling, safeguarding or the grade team before initiating duplicate contact.  \n"
+            "2. Prioritise repeated/multiple low pastoral factors where other evidence also raises concern.  \n"
+            "3. Use the PASS profile to shape the opening conversation, not to tell the student what is wrong.  \n"
+            "4. Record agreed next steps through the school's normal pastoral/safeguarding systems."
+        )
+        st.warning("If a conversation raises a safeguarding concern, stop using PASS as the decision framework and follow the school's safeguarding procedure immediately.")
+
+    with tabs[4]:
+        show_student_profile(sub, schema, "counsellor")
+
+
 def render_slt(df: pd.DataFrame, schema) -> None:
     st.header("SLT view — school climate and intervention load")
     st.markdown(
@@ -413,11 +680,13 @@ if not uploaded:
     st.info("Upload the PASS Excel export to begin. The app expects the Testwise StudentData layout with nine PASS percentile columns.")
     st.markdown(
         """
-### Designed for three levels of use
+### Designed for five layers of use
 
 - **SLT:** high-level school climate, completion, grade/homeroom variation and intervention load — no student names.
 - **Grade Level Leaders:** grade diagnosis, homeroom comparison, named student priority list and intervention planning.
 - **Homeroom Teachers:** a clear picture of their own homeroom, check-in queue and individual student profiles.
+- **Learning Support:** cross-grade learning-barrier patterns, a review queue and targeted access-to-learning responses.
+- **Counsellors:** pastoral/relational patterns, a contextual review queue and student conversation planning.
 
 The point is to turn PASS into an operating system for follow-up, not another report staff look at once and forget.
         """
@@ -434,7 +703,12 @@ except Exception as exc:
 with st.sidebar:
     st.success(f"Loaded {len(df)} students from ‘{sheet_name}’.")
     st.header("2. Choose view")
-    role = st.radio("Role", ["SLT", "Grade Level Leader", "Homeroom Teacher"], index=0)
+    role = st.radio(
+        "Role",
+        ["SLT", "Grade Level Leader", "Homeroom Teacher", "Learning Support", "Counsellor"],
+        index=0,
+    )
+    st.caption("The role selector changes the analysis view; it is not role-based access control. Everyone with the current app password can switch views.")
     st.divider()
     interpretation_note()
     st.caption("PASS is a pastoral screening/attitudinal tool. It should be triangulated with other evidence and must not be treated as a clinical or safeguarding diagnosis.")
@@ -443,5 +717,9 @@ if role == "SLT":
     render_slt(df, schema)
 elif role == "Grade Level Leader":
     render_gl(df, schema)
-else:
+elif role == "Homeroom Teacher":
     render_hrt(df, schema)
+elif role == "Learning Support":
+    render_learning_support(df, schema)
+else:
+    render_counsellor(df, schema)
