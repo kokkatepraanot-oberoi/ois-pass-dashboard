@@ -50,6 +50,34 @@ BAND_COLOURS = {
 LEARNING_SUPPORT_FACTORS = [2, 3, 4, 6, 7, 9]
 COUNSELLOR_FACTORS = [1, 3, 5, 7, 8]
 
+# 2026-27 Middle School homeroom teachers from the Homeroom sheet in
+# “Homeroom and Secondary Staff Data (A.Y. 2026- 2027)”.
+HOMEROOM_TEACHERS = {
+    "6.1": "Shruti Uniyal",
+    "6.2": "Jigna Doshi",
+    "6.3": "Neha Kapadia",
+    "6.4": "Sneha Sundrani",
+    "6.5": "Debduti Ray",
+    "6.6": "Ursula Sanghvi",
+    "6.7": "Prathamesh Cheulkar",
+    "6.8": "Ramprasad Iyengar",
+    "7.1": "Pradeep Singh",
+    "7.2": "Aashana Musle",
+    "7.3": "Manasi Bhingarde",
+    "7.4": "Pallavi Rajguru",
+    "7.5": "Vaishnavi Bapardekar",
+    "7.6": "Roshan Chavan",
+    "7.7": "Antara Roy",
+    "7.8": "Rohit Kumar",
+    "8.1": "Vanita Amin",
+    "8.2": "Swapnil Shetty",
+    "8.3": "Lata Dalvi",
+    "8.4": "Mamta Pasi",
+    "8.5": "Ashwin Subramanian",
+    "8.6": "Dhanisha Benoy",
+    "8.7": "Neha Basak",
+}
+
 
 st.markdown(
     """
@@ -67,15 +95,24 @@ st.markdown(
 def password_gate() -> None:
     expected = st.secrets.get("APP_PASSWORD", "")
     if not expected:
-        st.sidebar.caption("Local/unlocked mode. Configure APP_PASSWORD in Streamlit secrets before school deployment.")
-        return
+        st.title("OIS Middle School PASS Dashboard")
+        st.error("Staff access is not configured yet. An administrator must set APP_PASSWORD in the Streamlit app secrets before anyone can use the dashboard.")
+        st.caption("The dashboard now fails closed: there is no unlocked mode when APP_PASSWORD is missing.")
+        st.stop()
+
     if st.session_state.get("pass_authenticated"):
         return
+
     st.title("OIS Middle School PASS Dashboard")
-    entered = st.text_input("School access password", type="password")
-    if st.button("Enter"):
-        if entered == expected:
+    st.caption("Authorised OIS staff only")
+    staff_name = st.text_input("Staff name")
+    entered = st.text_input("Password", type="password")
+    if st.button("Sign in", type="primary"):
+        if not staff_name.strip():
+            st.error("Enter your name before signing in.")
+        elif entered == expected:
             st.session_state["pass_authenticated"] = True
+            st.session_state["staff_name"] = staff_name.strip()
             st.rerun()
         else:
             st.error("Incorrect password.")
@@ -166,9 +203,6 @@ def attention_chart(summary: pd.DataFrame, group_col: str, title: str) -> None:
         st.warning("This comparison could not be displayed because required summary fields are missing.")
         return
 
-    # `attention_summary` already contains a total `Students` column. Pandas does
-    # not allow melt(value_name=...) to reuse an existing column name, so keep
-    # the melted count in a distinct field.
     count_col = "Attention students"
     long = summary.melt(
         id_vars=[group_col, "Completed"],
@@ -302,7 +336,6 @@ def specialist_factor_summary(df: pd.DataFrame, schema, factors: list[int]) -> p
 
 
 def specialist_working_data(df: pd.DataFrame, schema, factors: list[int]) -> pd.DataFrame:
-    """Create a domain-specific PASS review status without changing the official PASS data."""
     out = df.copy()
     factor_cols = {n: schema.factor_cols[n] for n in factors}
     cols = list(factor_cols.values())
@@ -576,7 +609,8 @@ def render_slt(df: pd.DataFrame, schema) -> None:
 
     with tabs[2]:
         hrs = homeroom_summary(df, schema)
-        cols = ["Homeroom", "Students", "Completed", "Completion %", "Immediate review", "Targeted support", "Monitor", "Generally positive", "Immediate/targeted %", "Most common concern", "Top concern % ≤20"]
+        hrs.insert(1, "HRT", hrs["Homeroom"].map(HOMEROOM_TEACHERS).fillna(""))
+        cols = ["Homeroom", "HRT", "Students", "Completed", "Completion %", "Immediate review", "Targeted support", "Monitor", "Generally positive", "Immediate/targeted %", "Most common concern", "Top concern % ≤20"]
         st.caption("Use this as a resourcing and follow-up map. Do not infer teacher quality from a homeroom pattern without triangulation.")
         st.dataframe(hrs[cols], hide_index=True, use_container_width=True)
         downloadable_csv(hrs[cols], "Download homeroom summary", "pass_homeroom_summary.csv", "slt_hr_dl")
@@ -611,6 +645,7 @@ def render_gl(df: pd.DataFrame, schema) -> None:
 
     with tabs[1]:
         hrs = homeroom_summary(sub, schema)
+        hrs.insert(1, "HRT", hrs["Homeroom"].map(HOMEROOM_TEACHERS).fillna(""))
         st.caption("Start with patterns, then check whether they are consistent across homerooms or concentrated in one group.")
         st.dataframe(hrs, hide_index=True, use_container_width=True)
         attention_chart(attention_summary(sub, "Homeroom"), "Homeroom", f"{grade}: attention profile by homeroom")
@@ -639,7 +674,21 @@ def render_gl(df: pd.DataFrame, schema) -> None:
 def render_hrt(df: pd.DataFrame, schema) -> None:
     st.header("Homeroom Teacher view — know your students and act early")
     homerooms = sorted(df["Homeroom"].dropna().astype(str).unique().tolist())
-    homeroom = st.selectbox("Homeroom", homerooms, key="hrt_hr")
+    signed_in = st.session_state.get("staff_name", "").strip().casefold()
+    own_homeroom = next(
+        (hr for hr, teacher in HOMEROOM_TEACHERS.items() if teacher.casefold() == signed_in and hr in homerooms),
+        None,
+    )
+    default_index = homerooms.index(own_homeroom) if own_homeroom in homerooms else 0
+    homeroom = st.selectbox(
+        "Homeroom",
+        homerooms,
+        index=default_index,
+        key="hrt_hr",
+        format_func=lambda hr: f"{hr} — {HOMEROOM_TEACHERS.get(hr, 'HRT not mapped')}",
+    )
+    teacher = HOMEROOM_TEACHERS.get(homeroom, "HRT not mapped")
+    st.caption(f"Homeroom teacher: **{teacher}**")
     sub = df[df["Homeroom"] == homeroom].copy()
     data_quality_strip(sub)
 
@@ -672,6 +721,12 @@ st.title("OIS Middle School PASS Dashboard")
 st.caption("Pupil Attitudes to Self and School | Middle School pastoral analysis and intervention planning")
 
 with st.sidebar:
+    st.caption(f"Signed in as **{st.session_state.get('staff_name', 'OIS staff')}**")
+    if st.button("Log out", use_container_width=True):
+        st.session_state.pop("pass_authenticated", None)
+        st.session_state.pop("staff_name", None)
+        st.rerun()
+    st.divider()
     st.header("1. Load PASS data")
     uploaded = st.file_uploader("Upload Testwise PASS Excel export", type=["xlsx"])
     st.caption("Live pupil data is processed in the current Streamlit session. Do not commit the export to GitHub.")
