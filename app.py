@@ -807,7 +807,15 @@ def render_slt(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema) -> Non
             fig = px.bar(counts, x="Longitudinal status", y="Students", color="Longitudinal status", color_discrete_map=LONGITUDINAL_COLOURS, title="Student longitudinal profile")
             fig.update_layout(height=380, showlegend=False, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(longi[longi["Longitudinal status"].isin(["New concern", "Persistent concern", "Chronic concern", "Recovered", "Watch deterioration"])], hide_index=True, use_container_width=True)
+            strategic = longi[longi["Longitudinal status"].isin(["New concern", "Persistent concern", "Chronic concern", "Recovered", "Watch deterioration"])].copy()
+            slt_longitudinal = (
+                strategic.groupby(["Grade", "Longitudinal status"], dropna=False)
+                .size()
+                .reset_index(name="Students")
+                .sort_values(["Grade", "Students"], ascending=[True, False])
+            )
+            st.dataframe(slt_longitudinal, hide_index=True, use_container_width=True)
+            st.caption("The SLT longitudinal view deliberately stays at cohort level. Named students remain in the GL, HRT and specialist views.")
         else:
             st.info("At least two survey waves are needed for emerging/persistent analysis.")
 
