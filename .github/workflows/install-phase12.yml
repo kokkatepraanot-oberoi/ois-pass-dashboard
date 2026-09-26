@@ -32,7 +32,10 @@ jobs:
               zlib.decompress(base64.b64decode(app_payload))
           )
 
-          logic_payload = pathlib.Path('.upgrade2/pass_logic.py.z.b64').read_text().strip()
+          logic_payload = ''.join(
+              pathlib.Path(f'.upgrade2/logic.part{i}.b64').read_text().strip()
+              for i in range(3)
+          )
           pathlib.Path('pass_logic.py').write_bytes(
               zlib.decompress(base64.b64decode(logic_payload))
           )
