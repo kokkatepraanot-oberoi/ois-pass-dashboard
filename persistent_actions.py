@@ -9,6 +9,24 @@ from specialist_guidance import factor_label
 from storage import filtered_records, save_new_record, storage_configured, storage_status, update_record
 
 
+ADMIN_EMAIL = "praanot.kokkate@oberoi-is.org"
+
+
+def _show_storage_connection_error() -> None:
+    staff_email = str(st.session_state.get("staff_email", "")).strip().lower()
+    if staff_email == ADMIN_EMAIL:
+        st.error(
+            "The PASS intervention store cannot be reached. The service account is configured, but Google Sheets denied access. "
+            "Check that the Google Sheets API is enabled for the 'ois-dashboards' Google Cloud project and that "
+            "pass-dashboard@ois-dashboards.iam.gserviceaccount.com has Editor access to the OIS PASS Intervention & Review Store."
+        )
+    else:
+        st.info(
+            "Saved intervention / review records are temporarily unavailable. Your PASS dashboard data is unaffected. "
+            "The dashboard administrator has been asked to restore the storage connection."
+        )
+
+
 def render_action_manager(
     seed_df: pd.DataFrame,
     role_name: str,
@@ -21,12 +39,17 @@ def render_action_manager(
     st.markdown("### Saved intervention / review records")
     if not storage_configured():
         st.warning(
-            "Persistent storage is not connected yet. An administrator must add the PASS Google Sheet "
-            "and Google service-account credentials to Streamlit Secrets. " + storage_status()
+            "Persistent storage is not connected yet. An administrator must add the Google service-account credentials "
+            "to Streamlit Secrets. " + storage_status()
         )
         return
 
-    saved = filtered_records(role=role_name, scope=scope_label)
+    try:
+        saved = filtered_records(role=role_name, scope=scope_label)
+    except Exception:
+        _show_storage_connection_error()
+        return
+
     if not saved.empty:
         cols = ["Updated at", "Student", "Record type", "PASS factor", "Action agreed", "Owner name", "Review date", "Status", "Escalate to"]
         st.dataframe(saved[[c for c in cols if c in saved.columns]], hide_index=True, use_container_width=True)
@@ -89,30 +112,34 @@ def render_action_manager(
                 longitudinal = str(selected_row.get("Longitudinal status", ""))
                 concern_waves = str(selected_row.get("Repeated concern across survey waves", ""))
 
-            save_new_record({
-                "Student ID": student_id,
-                "Student": "" if selected_student == "Cohort / no individual student" else selected_student,
-                "Grade": grade,
-                "Homeroom": homeroom,
-                "Role": role_name,
-                "Record type": record_type,
-                "PASS factor": "General / cohort action" if factor_choice == 0 else factor_label(factor_choice),
-                "Why this is a concern": why,
-                "Longitudinal status": longitudinal,
-                "Concern waves": concern_waves,
-                "Action agreed": action,
-                "Owner name": owner,
-                "Owner email": st.session_state.get("staff_email", ""),
-                "Review date": "" if review_date is None else str(review_date),
-                "Status": status,
-                "Escalate to": escalate,
-                "Brief evidence / outcome": evidence,
-                "Scope": scope_label,
-                "Latest PASS wave": latest_wave,
-                "Last editor email": st.session_state.get("staff_email", ""),
-            })
-            st.success("Saved to the OIS PASS intervention store.")
-            st.rerun()
+            try:
+                save_new_record({
+                    "Student ID": student_id,
+                    "Student": "" if selected_student == "Cohort / no individual student" else selected_student,
+                    "Grade": grade,
+                    "Homeroom": homeroom,
+                    "Role": role_name,
+                    "Record type": record_type,
+                    "PASS factor": "General / cohort action" if factor_choice == 0 else factor_label(factor_choice),
+                    "Why this is a concern": why,
+                    "Longitudinal status": longitudinal,
+                    "Concern waves": concern_waves,
+                    "Action agreed": action,
+                    "Owner name": owner,
+                    "Owner email": st.session_state.get("staff_email", ""),
+                    "Review date": "" if review_date is None else str(review_date),
+                    "Status": status,
+                    "Escalate to": escalate,
+                    "Brief evidence / outcome": evidence,
+                    "Scope": scope_label,
+                    "Latest PASS wave": latest_wave,
+                    "Last editor email": st.session_state.get("staff_email", ""),
+                })
+            except Exception:
+                _show_storage_connection_error()
+            else:
+                st.success("Saved to the OIS PASS intervention store.")
+                st.rerun()
 
     if not saved.empty:
         with st.expander("Update an existing saved record"):
@@ -134,12 +161,16 @@ def render_action_manager(
                 update_escalate = st.selectbox("Escalate / involve", escalation_options, index=escalation_options.index(current_escalation) if current_escalation in escalation_options else 0)
                 update_evidence = st.text_area("Brief evidence / outcome", value=str(rec.get("Brief evidence / outcome", "")))
                 if st.form_submit_button("Update saved record"):
-                    update_record(str(rec["Record ID"]), {
-                        "Action agreed": update_action,
-                        "Status": update_status,
-                        "Escalate to": update_escalate,
-                        "Brief evidence / outcome": update_evidence,
-                        "Last editor email": st.session_state.get("staff_email", ""),
-                    })
-                    st.success("Saved record updated.")
-                    st.rerun()
+                    try:
+                        update_record(str(rec["Record ID"]), {
+                            "Action agreed": update_action,
+                            "Status": update_status,
+                            "Escalate to": update_escalate,
+                            "Brief evidence / outcome": update_evidence,
+                            "Last editor email": st.session_state.get("staff_email", ""),
+                        })
+                    except Exception:
+                        _show_storage_connection_error()
+                    else:
+                        st.success("Saved record updated.")
+                        st.rerun()
