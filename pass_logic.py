@@ -657,6 +657,15 @@ def longitudinal_status_table(history_df: pd.DataFrame, latest_df: pd.DataFrame,
                 "Deteriorating factors": "; ".join(f"Factor {n} – {FACTOR_NAMES[n]}" for n in sorted(deterioration_factors)),
                 "Repeated concern across survey waves": max(factor_concern_waves.values(), default=0),
                 "PASS waves available": int(hist["Wave key"].nunique()),
+                "Most repeated concern factor": (
+                    f"Factor {max(factor_concern_waves, key=factor_concern_waves.get)} – {FACTOR_NAMES[max(factor_concern_waves, key=factor_concern_waves.get)]}"
+                    if factor_concern_waves else ""
+                ),
+                "Repeated concern pattern": (
+                    f"Factor {max(factor_concern_waves, key=factor_concern_waves.get)} – {FACTOR_NAMES[max(factor_concern_waves, key=factor_concern_waves.get)]}: "
+                    f"at or below the 20th percentile in {max(factor_concern_waves.values(), default=0)} of {int(hist['Wave key'].nunique())} available PASS waves."
+                    if factor_concern_waves else "No repeated concern history available."
+                ),
                 "Repeated concern meaning": (
                     f"At least one selected PASS factor scored at or below the 20th percentile in "
                     f"{max(factor_concern_waves.values(), default=0)} of {int(hist['Wave key'].nunique())} available survey waves. "

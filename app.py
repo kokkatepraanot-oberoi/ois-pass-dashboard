@@ -744,7 +744,7 @@ def specialist_priority_table(df: pd.DataFrame, schema, factors: List[int], hist
     if history_df is not None and has_history(history_df):
         long_cols = [
             "Student ID", "Longitudinal status", "Repeated concern across survey waves",
-            "PASS waves available", "Repeated concern meaning", "Chronic factors",
+            "PASS waves available", "Most repeated concern factor", "Repeated concern pattern", "Repeated concern meaning", "Chronic factors",
             "Persistent factors", "New factors", "Recovered factors", "Deteriorating factors",
         ]
         longi = longitudinal_status_table(history_df, df, schema, factors=factors)[long_cols]
@@ -1069,7 +1069,7 @@ def render_specialist(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema,
             "Targeted concern factors (6th–20th percentile)",
             "Watch factors (21st–30th percentile)",
             "Why this is a concern", "Longitudinal status",
-            "Repeated concern across survey waves", "PASS waves available", "Repeated concern meaning",
+            "Most repeated concern factor", "Repeated concern pattern", "Repeated concern meaning",
         ]
         st.dataframe(display_queue[[c for c in preferred if c in display_queue.columns]], hide_index=True, use_container_width=True)
         downloadable_csv(display_queue, f"Download {role_name} review queue", f"{role_name.lower().replace(' ', '_')}_review_queue.csv", f"{role_name}_dl")
