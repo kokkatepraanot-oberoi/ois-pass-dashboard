@@ -25,6 +25,7 @@ jobs:
           python .github/scripts/patch_explicit_labels.py
           python .github/scripts/patch_plain_english.py
           python .github/scripts/patch_repeated_factor.py
+          python .github/scripts/patch_runtime_stability.py
           python -m py_compile app.py pass_logic.py storage.py specialist_guidance.py persistent_actions.py
       - name: Commit changes
         run: |
@@ -35,5 +36,5 @@ jobs:
             echo "No changes to commit."
             exit 0
           fi
-          git commit -m "Clarify specialist PASS views and persistent actions"
+          git commit -m "Stabilise PASS longitudinal and student explorer views"
           git push
