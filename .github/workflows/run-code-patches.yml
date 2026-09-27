@@ -15,18 +15,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fix logout and account switching
+      - name: Apply PASS dashboard patches
         run: |
           python .github/scripts/patch_logout_switch.py
-          python -m py_compile app.py pass_logic.py storage.py specialist_guidance.py persistent_actions.py drive_storage.py
+          python .github/scripts/patch_role_access.py
+          python -m py_compile app.py pass_logic.py storage.py specialist_guidance.py persistent_actions.py drive_storage.py role_access.py
       - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py
+          git add app.py role_access.py
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
-          git commit -m "Fix Google account switching after denied access"
+          git commit -m "Move PASS role access to Google Sheet"
           git push
