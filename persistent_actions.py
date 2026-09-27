@@ -91,7 +91,7 @@ def render_action_manager(
             help="Keep this factual and brief. Do not enter detailed counselling or safeguarding notes here.",
         )
         action = st.text_area("Action agreed", help="State exactly what will happen, who will do it and what evidence you expect to see.")
-        owner = st.text_input("Owner", value=st.session_state.get("staff_name", ""))
+        owner = st.text_input("Owner", value="", placeholder="Enter the person responsible")
         review_date = st.date_input("Review date", value=None)
         status = st.selectbox("Status", ["Not started", "In progress", "Review due", "Complete"])
         escalate = st.selectbox("Escalate / involve", ["", "HRT", "GL", "Learning Support", "Counsellor", "Subject teacher", "SLT", "Safeguarding"])
