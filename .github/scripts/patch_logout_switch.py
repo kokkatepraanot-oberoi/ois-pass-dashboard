@@ -10,14 +10,22 @@ if 'def logout_and_clear()' not in text:
         raise SystemExit("Could not find ALL_VIEWS anchor")
     text = text.replace(anchor, helper, 1)
 
-text = text.replace(
-    'st.button("Sign out and use school account", on_click=st.logout, type="primary")',
-    'st.button("Sign out and use school account", on_click=logout_and_clear, type="primary")',
-)
-text = text.replace(
-    'st.button("Log out", on_click=st.logout, use_container_width=True)',
-    'st.button("Log out / switch account", on_click=logout_and_clear, use_container_width=True)',
-)
+replacements = [
+    (
+        'st.button("Sign out", on_click=st.logout)',
+        'st.button("Sign out", on_click=logout_and_clear)',
+    ),
+    (
+        'st.button("Sign out and use school account", on_click=st.logout, type="primary")',
+        'st.button("Sign out and use school account", on_click=logout_and_clear, type="primary")',
+    ),
+    (
+        'st.button("Log out", on_click=st.logout, use_container_width=True)',
+        'st.button("Log out / switch account", on_click=logout_and_clear, use_container_width=True)',
+    ),
+]
+for old, new in replacements:
+    text = text.replace(old, new)
 
 old_denied = '''    if not access["views"]:\n        with st.sidebar:\n            st.error("Your Google account is authenticated, but no PASS dashboard role has been assigned to it.")\n            st.caption("Ask the dashboard administrator to add your school email to the role configuration.")\n        st.stop()\n'''
 new_denied = '''    if not access["views"]:\n        with st.sidebar:\n            st.error("Your Google account is authenticated, but no PASS dashboard role has been assigned to it.")\n            current_email = str(st.session_state.get("staff_email", "")).strip()\n            if current_email:\n                st.caption(f"Signed in as **{current_email}**")\n            st.button(\n                "Sign out / switch Google account",\n                on_click=logout_and_clear,\n                type="primary",\n                use_container_width=True,\n                key="no_role_logout",\n            )\n            st.caption("Ask the dashboard administrator to add your school email to the role configuration if you should have access.")\n        st.stop()\n'''
