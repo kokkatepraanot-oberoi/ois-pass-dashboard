@@ -24,6 +24,7 @@ jobs:
           python .github/scripts/patch_specialist_metrics.py
           python .github/scripts/patch_explicit_labels.py
           python .github/scripts/patch_plain_english.py
+          python .github/scripts/patch_repeated_factor.py
           python -m py_compile app.py pass_logic.py storage.py specialist_guidance.py persistent_actions.py
       - name: Commit changes
         run: |
