@@ -116,6 +116,13 @@ DEFAULT_ADMIN_EMAILS = {"praanot.kokkate@oberoi-is.org"}
 ALL_VIEWS = ["SLT", "Grade Level Leader", "Homeroom Teacher", "Learning Support", "Counsellor"]
 
 
+def logout_and_clear() -> None:
+    """Clear app identity state before ending the Streamlit OIDC session."""
+    for key in ("staff_name", "staff_email"):
+        st.session_state.pop(key, None)
+    st.logout()
+
+
 def _normalise_person(value: str) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
@@ -371,14 +378,14 @@ def google_auth_gate() -> None:
 
     if identity.get("email_verified") is False:
         st.error("Google did not return a verified email address for this account.")
-        st.button("Sign out", on_click=st.logout)
+        st.button("Sign out", on_click=logout_and_clear)
         st.stop()
 
     if not email.endswith(f"@{ALLOWED_GOOGLE_DOMAIN}"):
         st.error("Access is restricted to OIS school Google accounts (@oberoi-is.org).")
         if email:
             st.caption(f"Signed in as {email}")
-        st.button("Sign out and use school account", on_click=st.logout, type="primary")
+        st.button("Sign out and use school account", on_click=logout_and_clear, type="primary")
         st.stop()
 
     st.session_state["staff_name"] = name
@@ -1176,7 +1183,17 @@ def main() -> None:
     if not access["views"]:
         with st.sidebar:
             st.error("Your Google account is authenticated, but no PASS dashboard role has been assigned to it.")
-            st.caption("Ask the dashboard administrator to add your school email to the role configuration.")
+            current_email = str(st.session_state.get("staff_email", "")).strip()
+            if current_email:
+                st.caption(f"Signed in as **{current_email}**")
+            st.button(
+                "Sign out / switch Google account",
+                on_click=logout_and_clear,
+                type="primary",
+                use_container_width=True,
+                key="no_role_logout",
+            )
+            st.caption("Ask the dashboard administrator to add your school email to the role configuration if you should have access.")
         st.stop()
 
     source_file = None
@@ -1187,7 +1204,7 @@ def main() -> None:
     with st.sidebar:
         st.caption(f"Signed in as **{st.session_state.get('staff_name', 'OIS staff')}**")
         st.caption(st.session_state.get("staff_email", ""))
-        st.button("Log out", on_click=st.logout, use_container_width=True)
+        st.button("Log out / switch account", on_click=logout_and_clear, use_container_width=True)
         st.divider()
         st.header("1. PASS data")
 
