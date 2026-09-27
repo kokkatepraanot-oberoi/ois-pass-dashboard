@@ -1,0 +1,486 @@
+name: Specialist clarity and persistence
+
+on:
+  push:
+    paths:
+      - '.specialist-clarity-trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Improve labels, specialist guidance and persistent actions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          # ---------- PASS logic: use explicit factor names and explain repeated concerns ----------
+          p = Path('pass_logic.py')
+          text = p.read_text()
+          text = text.replace('f"F{n} {FACTOR_SHORT[n]}"', 'f"Factor {n} – {FACTOR_NAMES[n]}"')
+          text = text.replace('f"F{n} {FACTOR_NAMES[n]}"', 'f"Factor {n} – {FACTOR_NAMES[n]}"')
+          text = text.replace('f"F{int(row[\'Factor\'])} {row[\'Factor name\']}"', 'f"Factor {int(row[\'Factor\'])} – {row[\'Factor name\']}"')
+          text = text.replace('f"F{int(r[\'Factor\'])} {r[\'Factor name\']} ({r[\'% ≤20\']:.1f}% at/under 20th percentile)"', 'f"Factor {int(r[\'Factor\'])} – {r[\'Factor name\']} ({r[\'% ≤20\']:.1f}% at/under 20th percentile)"')
+
+          old = '''                "Concern waves (max factor)": max(factor_concern_waves.values(), default=0),
+                "Lowest factor": row["Lowest factor"],'''
+          new = '''                "Concern waves (max factor)": max(factor_concern_waves.values(), default=0),
+                "Repeated concern across survey waves": max(factor_concern_waves.values(), default=0),
+                "PASS waves available": int(hist["Wave key"].nunique()),
+                "Repeated concern meaning": (
+                    f"At least one of the selected PASS factors scored at or below the 20th percentile in "
+                    f"{max(factor_concern_waves.values(), default=0)} of {int(hist['Wave key'].nunique())} available survey waves. "
+                    "This is not a count of different problems and the waves do not have to be consecutive."
+                ),
+                "Lowest factor": row["Lowest factor"],'''
+          if old not in text:
+              raise SystemExit('Longitudinal concern-wave insertion point not found')
+          text = text.replace(old, new, 1)
+          p.write_text(text)
+
+          # ---------- App ----------
+          p = Path('app.py')
+          text = p.read_text()
+
+          marker = ')\n\n\nst.set_page_config('
+          storage_import = ''' )\n\nfrom storage import (\n    filtered_records,\n    save_new_record,\n    storage_configured,\n    storage_status,\n    update_record,\n)\n\n\nst.set_page_config('''
+          if 'from storage import (' not in text:
+              if marker not in text:
+                  raise SystemExit('Import insertion marker not found')
+              text = text.replace(marker, storage_import, 1)
+
+          # Explicit labels in charts / student prompts / action cards.
+          text = text.replace('plot["Label"] = plot.apply(lambda r: f"F{int(r[\'Factor\'])}", axis=1)', 'plot["Label"] = plot.apply(lambda r: f"Factor {int(r[\'Factor\'])} – {r[\'Factor name\']}", axis=1)')
+          text = text.replace('trend["Series"] = trend["Factor"].apply(lambda n: f"F{int(n)}")', 'trend["Series"] = trend["Factor"].apply(lambda n: f"Factor {int(n)} – {FACTOR_NAMES[int(n)]}")')
+          text = text.replace('f"F{item[\'factor\']} – {item[\'name\']} |', 'f"Factor {item[\'factor\']} – {item[\'name\']} |')
+          text = text.replace('f"**F{int(r[\'Factor\'])} {r[\'Factor name\']}**"', 'f"**Factor {int(r[\'Factor\'])} – {r[\'Factor name\']}**"')
+
+          helpers = r'''
+
+def factor_label(number: int) -> str:
+    return f"Factor {number} – {FACTOR_NAMES[number]}"
+
+
+SPECIALIST_GUIDANCE = {
+    "Learning Support": {
+        2: {
+            "why": "A low score can indicate that the student does not feel capable or successful as a learner. This may reflect an actual skill gap, repeated difficulty, or a perception that is stronger than the attainment evidence suggests.",
+            "do": "Triangulate with attainment/MAP, work samples and teacher observation. Identify where the student is successful, then plan a small mastery goal and the scaffold needed to reach it.",
+            "where": "Subject classrooms first; coordinate with the relevant teacher and HRT. Move to a Learning Support case review when the pattern is repeated across subjects or survey waves.",
+        },
+        3: {
+            "why": "Learner self-regard is about how learning affects the student's view of themselves. A low score may show that setbacks are becoming personal rather than remaining task-specific.",
+            "do": "Use strengths-and-evidence conversations, reduce public comparison, and create short achievable success experiences. Check whether the concern is only academic or part of a wider self-esteem issue.",
+            "where": "Classroom/HRT if mainly academic. Involve the counsellor if the concern is broader, emotionally significant or affecting the student's wider sense of self.",
+        },
+        4: {
+            "why": "Preparedness concerns can point to organisation, task-start, planning, equipment or metacognitive routines rather than ability.",
+            "do": "Choose one routine to teach explicitly: equipment, planning, task start, checking or submission. Use a checklist and review it after 2–3 weeks.",
+            "where": "Daily classroom and homeroom routines. Coordinate with HRT and subject teachers so the same routine is reinforced consistently.",
+        },
+        6: {
+            "why": "Low work-ethic scores can reflect task initiation, persistence, relevance, overload, distraction or difficulty. They should not be read simply as laziness.",
+            "do": "Find the barrier first. Compare subjects, then use chunking, visible milestones, a task-start cue and short review cycles. Monitor actual completion data.",
+            "where": "Subject lessons and HRT monitoring. Escalate to GL if the pattern is cross-curricular or linked to wider expectations/behaviour.",
+        },
+        7: {
+            "why": "Low confidence in learning can show avoidance of challenge, fear of failure or low perseverance when the answer is uncertain.",
+            "do": "Use low-stakes rehearsal, graduated challenge and explicit help-seeking strategies. Check whether the difficulty is academic confidence or emotional anxiety.",
+            "where": "Learning Support/subject teacher when academic. Involve the counsellor when anxiety or emotional distress appears to be driving the avoidance.",
+        },
+        9: {
+            "why": "A low response-to-curriculum-demands score can mean the amount, pace, difficulty, clarity or relevance of learning feels badly matched to the student.",
+            "do": "Compare the PASS result with attainment and subject patterns. Ask whether work feels too difficult, too easy, unclear, too much, or disconnected from prior learning before changing support.",
+            "where": "Subject-level curriculum access and differentiation first. Coordinate with subject teachers and GL; use Learning Support for repeated access barriers across subjects.",
+        },
+    },
+    "Counsellor": {
+        1: {
+            "why": "Low feelings-about-school scores can signal reduced belonging, comfort or perceived safety in school. PASS does not tell us the cause.",
+            "do": "Use a contextual check-in: when does school feel easiest/hardest, who feels safe to approach, and has anything changed socially or emotionally?",
+            "where": "Pastoral/counselling check-in. Liaise with HRT/GL for school context. If a safeguarding disclosure emerges, move immediately to the safeguarding process.",
+        },
+        3: {
+            "why": "Low learner self-regard may be academic, but it can also sit inside a wider pattern of self-esteem, shame or fear of failure.",
+            "do": "Explore whether negative self-talk is limited to learning or more general. Reinforce strengths and identify protective relationships and successful contexts.",
+            "where": "Counsellor if the issue is broad or emotionally significant; Learning Support/HRT if it is primarily about learning confidence or skill access.",
+        },
+        5: {
+            "why": "Low attitudes-to-teachers scores point to the student's perception of relationships with teachers. This is not automatically a counselling issue.",
+            "do": "Identify whether the concern is one teacher/subject or a general pattern. Understand the interaction before assuming motive or blame.",
+            "where": "Usually start with HRT/GL and the relevant teacher. Counsellor involvement is useful when the relationship issue is linked to trust, previous experiences, distress or broader relational patterns.",
+        },
+        7: {
+            "why": "Low confidence in learning can reflect fear of failure, anxiety under challenge or avoidance when uncertain.",
+            "do": "Explore the emotional response to challenge and what happens when the student feels stuck. Teach/reinforce coping and help-seeking where appropriate.",
+            "where": "Counsellor when anxiety/emotional response is prominent; Learning Support/subject teacher when the problem is mainly skill, challenge or classroom access.",
+        },
+        8: {
+            "why": "Low attitudes-to-attendance scores indicate how the student feels about coming to school; they are not the same as actual attendance data.",
+            "do": "Compare with actual attendance and explore barriers such as anxiety, peer relationships, sleep, workload, transport, health or family circumstances.",
+            "where": "HRT/GL attendance process plus counsellor support where emotional barriers are present. Family contact should follow the school's normal attendance/pastoral process.",
+        },
+    },
+}
+
+
+def specialist_reading_guide(role_name: str) -> None:
+    factors = LEARNING_SUPPORT_FACTORS if role_name == "Learning Support" else COUNSELLOR_FACTORS
+    st.markdown("### How to read this specialist view")
+    c1, c2, c3 = st.columns(3)
+    c1.info("**Immediate concern (≤5th percentile)**\n\nAt least one relevant PASS factor is in the lowest band. Review promptly and triangulate; this is not a diagnosis.")
+    c2.warning("**Targeted concern (6th–20th percentile)**\n\nA relevant factor is in the low-moderate band. Plan a check-in/intervention when other evidence supports it.")
+    c3.success("**Watch (21st–30th percentile)**\n\nA relevant factor sits in the moderate band. Monitor and act if attendance, attainment, behaviour or student voice points the same way.")
+    st.caption("The specialist lens only counts factors relevant to this role: " + "; ".join(factor_label(n) for n in factors) + ".")
+    with st.expander("What do 'longitudinal pattern' and 'repeated concern across survey waves' mean?", expanded=False):
+        st.markdown("- **New concern:** a relevant factor is ≤20 now but was not ≤20 in the previous survey wave.\n- **Persistent concern:** the same relevant factor is ≤20 now and was also ≤20 in the previous wave.\n- **Chronic concern:** the same relevant factor has been ≤20 in at least three available survey waves and is still a current concern.\n- **Recovered:** a previous ≤20 concern has moved above the watch band.\n- **Repeated concern across survey waves = 5** means at least one relevant factor was ≤20 in 5 available PASS waves. **It does not mean five different problems**, and those waves do not have to be consecutive. A value of 3 means the maximum for any one relevant factor is three waves.")
+
+
+def specialist_guidance_panel(role_name: str) -> None:
+    st.markdown(f"### What {role_name} can do")
+    if role_name == "Learning Support":
+        st.markdown("**Purpose:** identify barriers to accessing learning, test hypotheses against classroom/attainment evidence, and coordinate practical support. PASS should not be used to diagnose SEND.")
+    else:
+        st.markdown("**Purpose:** identify pastoral/relational signals that merit context or conversation. PASS should not be used as a mental-health assessment or automatic counselling referral.")
+    for number, item in SPECIALIST_GUIDANCE[role_name].items():
+        with st.expander(factor_label(number)):
+            st.markdown(f"**Why this may matter**  \n{item['why']}")
+            st.markdown(f"**What you can do**  \n{item['do']}")
+            st.markdown(f"**Where / who should intervene**  \n{item['where']}")
+    st.error("**Safeguarding overrides PASS.** If a student discloses or presents a safeguarding concern, stop using the PASS intervention workflow and follow the school's safeguarding procedure immediately.")
+
+
+def persistent_action_manager(seed_df: pd.DataFrame, role_name: str, scope_label: str, key_prefix: str, schema, factors: List[int] | None = None, latest_wave: str = "") -> None:
+    st.markdown("### Saved intervention / review record")
+    if not storage_configured():
+        st.warning("Persistent storage is not connected yet. An administrator must add the PASS Google Sheet and service-account credentials to Streamlit Secrets. " + storage_status())
+        return
+
+    saved = filtered_records(role=role_name, scope=scope_label)
+    if not saved.empty:
+        show_cols = ["Updated at", "Student", "Record type", "PASS factor", "Action agreed", "Owner name", "Review date", "Status", "Escalate to"]
+        st.dataframe(saved[[c for c in show_cols if c in saved.columns]], hide_index=True, use_container_width=True)
+    else:
+        st.caption("No saved records yet for this role/scope.")
+
+    working = seed_df.copy() if seed_df is not None else pd.DataFrame()
+    student_options = ["Cohort / no individual student"]
+    if not working.empty and "Student" in working.columns:
+        student_options += working["Student"].dropna().astype(str).drop_duplicates().sort_values().tolist()
+    selected_student = st.selectbox("Student / cohort", student_options, key=f"persist_student_{key_prefix}")
+    selected_row = None
+    if selected_student != "Cohort / no individual student" and not working.empty:
+        matches = working[working["Student"].astype(str) == selected_student]
+        if not matches.empty:
+            selected_row = matches.iloc[0]
+
+    factor_numbers = factors or list(schema.factor_cols.keys())
+    factor_choice = st.selectbox("PASS factor / focus", [0, *factor_numbers], format_func=lambda n: "General / cohort action" if n == 0 else factor_label(n), key=f"persist_factor_{key_prefix}")
+    percentile = ""
+    if selected_row is not None and factor_choice and factor_choice in schema.factor_cols:
+        raw_source = working[working["Student"].astype(str) == selected_student]
+        if not raw_source.empty:
+            # The seed table may not carry raw percentile columns; leave blank when unavailable.
+            col = schema.factor_cols[factor_choice]
+            if col in raw_source.columns:
+                value = raw_source.iloc[0][col]
+                percentile = "" if pd.isna(value) else value
+
+    default_why = ""
+    if selected_row is not None:
+        if "Why this is a concern" in selected_row.index:
+            default_why = str(selected_row.get("Why this is a concern", ""))
+        elif "Attention" in selected_row.index:
+            default_why = f"Current PASS status: {selected_row.get('Attention', '')}."
+
+    with st.form(f"persist_form_{key_prefix}", clear_on_submit=False):
+        record_type = st.selectbox("Record type", ["Intervention", "Check-in", "Review", "Cohort action"])
+        why = st.text_area("Why this is a concern / focus", value=default_why, help="Keep this factual and brief. Do not enter detailed counselling or safeguarding notes here.")
+        action = st.text_area("Action agreed", help="State exactly what will happen, who will do it and what evidence you expect to see.")
+        owner = st.text_input("Owner", value=st.session_state.get("staff_name", ""))
+        review_date = st.date_input("Review date", value=None)
+        status = st.selectbox("Status", ["Not started", "In progress", "Review due", "Complete"])
+        escalate = st.selectbox("Escalate / involve", ["", "HRT", "GL", "Learning Support", "Counsellor", "Subject teacher", "SLT", "Safeguarding"])
+        evidence = st.text_area("Brief evidence / outcome", help="Short operational evidence only. Detailed case notes stay in the school's approved pastoral/counselling system.")
+        submitted = st.form_submit_button("Save to OIS PASS store", type="primary")
+        if submitted:
+            student_id = ""
+            grade = ""
+            homeroom = ""
+            if selected_row is not None:
+                student_id = str(selected_row.get("Student ID", ""))
+                grade = str(selected_row.get("Grade", ""))
+                homeroom = str(selected_row.get("Homeroom", ""))
+            save_new_record({
+                "Student ID": student_id,
+                "Student": "" if selected_student == "Cohort / no individual student" else selected_student,
+                "Grade": grade,
+                "Homeroom": homeroom,
+                "Role": role_name,
+                "Record type": record_type,
+                "PASS factor": "General / cohort action" if factor_choice == 0 else factor_label(factor_choice),
+                "Factor percentile": percentile,
+                "Why this is a concern": why,
+                "Action agreed": action,
+                "Owner name": owner,
+                "Owner email": st.session_state.get("staff_email", ""),
+                "Review date": "" if review_date is None else str(review_date),
+                "Status": status,
+                "Escalate to": escalate,
+                "Brief evidence / outcome": evidence,
+                "Scope": scope_label,
+                "Latest PASS wave": latest_wave,
+                "Last editor email": st.session_state.get("staff_email", ""),
+            })
+            st.success("Saved to the OIS PASS intervention store.")
+            st.rerun()
+
+    if not saved.empty:
+        with st.expander("Update an existing saved record"):
+            labels = []
+            record_map = {}
+            for _, rec in saved.iterrows():
+                label = f"{rec.get('Student') or 'Cohort'} | {rec.get('Record type')} | {rec.get('Updated at')} | {str(rec.get('Record ID'))[:8]}"
+                labels.append(label)
+                record_map[label] = rec
+            chosen = st.selectbox("Saved record", labels, key=f"persist_edit_{key_prefix}")
+            rec = record_map[chosen]
+            with st.form(f"persist_update_form_{key_prefix}"):
+                update_action = st.text_area("Action agreed", value=str(rec.get("Action agreed", "")))
+                update_status = st.selectbox("Status", ["Not started", "In progress", "Review due", "Complete"], index=max(0, ["Not started", "In progress", "Review due", "Complete"].index(str(rec.get("Status", "Not started"))) if str(rec.get("Status", "Not started")) in ["Not started", "In progress", "Review due", "Complete"] else 0))
+                update_escalate = st.selectbox("Escalate / involve", ["", "HRT", "GL", "Learning Support", "Counsellor", "Subject teacher", "SLT", "Safeguarding"], index=0)
+                update_evidence = st.text_area("Brief evidence / outcome", value=str(rec.get("Brief evidence / outcome", "")))
+                if st.form_submit_button("Update saved record"):
+                    update_record(str(rec["Record ID"]), {
+                        "Action agreed": update_action,
+                        "Status": update_status,
+                        "Escalate to": update_escalate,
+                        "Brief evidence / outcome": update_evidence,
+                        "Last editor email": st.session_state.get("staff_email", ""),
+                    })
+                    st.success("Saved record updated.")
+                    st.rerun()
+'''
+
+          insertion = '\n\ndef build_domain_data(df: pd.DataFrame, schema, factors: List[int]) -> pd.DataFrame:'
+          if 'def specialist_reading_guide(' not in text:
+              if insertion not in text:
+                  raise SystemExit('build_domain_data insertion point not found')
+              text = text.replace(insertion, helpers + insertion, 1)
+
+          new_build = r'''def build_domain_data(df: pd.DataFrame, schema, factors: List[int]) -> pd.DataFrame:
+    out = df.copy()
+    cols = [schema.factor_cols[n] for n in factors]
+
+    def domain_attention(row):
+        if not bool(row["Completed PASS"]):
+            return "Not completed"
+        vals = row[cols]
+        if (vals <= 5).any():
+            return "Immediate review"
+        if (vals <= 20).any():
+            return "Targeted support"
+        if (vals <= 30).any():
+            return "Monitor"
+        return "Generally positive"
+
+    def factor_list(row, lower, upper):
+        values = []
+        for number in factors:
+            value = row[schema.factor_cols[number]]
+            if pd.isna(value):
+                continue
+            if lower <= float(value) <= upper:
+                values.append(f"{factor_label(number)} (percentile {float(value):.1f})")
+        return "; ".join(values)
+
+    out["Specialist priority"] = out.apply(domain_attention, axis=1)
+    out["Immediate concern factors (≤5th percentile)"] = out.apply(lambda r: factor_list(r, 0, 5), axis=1)
+    out["Targeted concern factors (6th–20th percentile)"] = out.apply(lambda r: factor_list(r, 6, 20), axis=1)
+    out["Watch factors (21st–30th percentile)"] = out.apply(lambda r: factor_list(r, 21, 30), axis=1)
+    out["Number of immediate concern factors"] = out[cols].apply(lambda row: int((row <= 5).sum()) if row.notna().all() else 0, axis=1)
+    out["Number of concern factors (≤20th)"] = out[cols].apply(lambda row: int((row <= 20).sum()) if row.notna().all() else 0, axis=1)
+    out["Number of watch factors (21st–30th)"] = out[cols].apply(lambda row: int(((row >= 21) & (row <= 30)).sum()) if row.notna().all() else 0, axis=1)
+    out["Lowest relevant percentile"] = out[cols].min(axis=1, skipna=True)
+
+    def why(row):
+        status = row["Specialist priority"]
+        if status == "Immediate review":
+            return "At least one specialist-relevant factor is at or below the 5th percentile. Review promptly and triangulate with other evidence."
+        if status == "Targeted support":
+            return "At least one specialist-relevant factor is between the 6th and 20th percentile. A planned check-in/support response may be appropriate."
+        if status == "Monitor":
+            return "No specialist factor is ≤20, but at least one is in the 21st–30th percentile watch band. Monitor and use other evidence before intervening."
+        if status == "Generally positive":
+            return "All specialist-relevant factors are at or above the 31st percentile in the latest PASS wave."
+        return "PASS was not completed in the latest wave."
+    out["Why this is a concern"] = out.apply(why, axis=1)
+    return out'''
+          pattern = r'def build_domain_data\(.*?\n\ndef specialist_summary'
+          if not re.search(pattern, text, flags=re.S):
+              raise SystemExit('build_domain_data block not found')
+          text = re.sub(pattern, new_build + '\n\ndef specialist_summary', text, count=1, flags=re.S)
+
+          new_priority = r'''def specialist_priority_table(df: pd.DataFrame, schema, factors: List[int], history_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    working = build_domain_data(df, schema, factors)
+    cols = [
+        "Student",
+        "Student ID",
+        "Grade",
+        "Homeroom",
+        "Specialist priority",
+        "Immediate concern factors (≤5th percentile)",
+        "Targeted concern factors (6th–20th percentile)",
+        "Watch factors (21st–30th percentile)",
+        "Number of immediate concern factors",
+        "Number of concern factors (≤20th)",
+        "Number of watch factors (21st–30th)",
+        "Lowest relevant percentile",
+        "Why this is a concern",
+        "Attention",
+    ]
+    out = working[cols].copy()
+    if history_df is not None and has_history(history_df):
+        long_cols = [
+            "Student ID",
+            "Longitudinal status",
+            "Repeated concern across survey waves",
+            "PASS waves available",
+            "Repeated concern meaning",
+            "Chronic factors",
+            "Persistent factors",
+            "New factors",
+            "Recovered factors",
+            "Deteriorating factors",
+        ]
+        longi = longitudinal_status_table(history_df, df, schema, factors=factors)[long_cols]
+        out = out.merge(longi, on="Student ID", how="left")
+    rank = {v: i for i, v in enumerate(ATTENTION_ORDER)}
+    out["_rank"] = out["Specialist priority"].map(rank).fillna(99)
+    out = out.sort_values(
+        ["_rank", "Number of immediate concern factors", "Number of concern factors (≤20th)", "Lowest relevant percentile"],
+        ascending=[True, False, False, True],
+    ).drop(columns="_rank")
+    return out'''
+          pattern = r'def specialist_priority_table\(.*?\n\ndef intervention_tracker'
+          if not re.search(pattern, text, flags=re.S):
+              raise SystemExit('specialist_priority_table block not found')
+          text = re.sub(pattern, new_priority + '\n\ndef intervention_tracker', text, count=1, flags=re.S)
+
+          # Use persistent store instead of session-only trackers in all role views.
+          text = text.replace(
+              'intervention_tracker("SLT", "slt")',
+              'persistent_action_manager(pd.DataFrame(), "SLT", "Whole Middle School", "slt", schema, latest_wave=latest_df["Wave"].iloc[0])',
+          )
+          text = text.replace(
+              'intervention_tracker(grade, f"gl_{grade.replace(\' \', \'_\')}")\n        workflow_editor(focus, f"gl_{grade.replace(\' \', \'_\')}", "Student intervention / review log")',
+              'persistent_action_manager(focus, "Grade Level Leader", grade, f"gl_{grade.replace(\' \', \'_\')}", schema, latest_wave=current["Wave"].iloc[0])',
+          )
+          text = text.replace(
+              'intervention_tracker(homeroom, f"hrt_{homeroom}")\n        workflow_editor(queue if \'queue\' in locals() else student_priority_table(current), f"hrt_{homeroom}", "HRT check-in / review log")',
+              'persistent_action_manager(queue if \'queue\' in locals() else student_priority_table(current), "Homeroom Teacher", homeroom, f"hrt_{homeroom}", schema, latest_wave=current["Wave"].iloc[0])',
+          )
+
+          new_specialist = r'''def render_specialist(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema, role_name: str, factors: List[int], intro: str, queue_caption: str) -> None:
+    grades = sorted(latest_df["Grade"].dropna().astype(str).unique().tolist())
+    scope = st.selectbox("Scope", ["Whole Middle School", *grades], key=f"scope_{role_name}")
+    current = latest_df.copy() if scope == "Whole Middle School" else latest_df[latest_df["Grade"] == scope].copy()
+    history = history_df.copy() if scope == "Whole Middle School" else history_df[history_df["Grade"] == scope].copy()
+    st.markdown(f'<div class="ois-callout"><b>{role_name}:</b> {intro}</div>', unsafe_allow_html=True)
+    specialist_reading_guide(role_name)
+    metric_strip(current, extra_label="Specialist factors", extra_value=len(factors))
+    tabs = st.tabs(["Profile", "Cohort patterns", "Review queue", "How to intervene", "Student explorer"])
+
+    with tabs[0]:
+        fs = factor_summary(current, schema)
+        fs = fs[fs["Factor"].isin(factors)]
+        factor_chart(fs, f"{scope}: {role_name} factor profile")
+        factor_table(fs)
+        st.markdown("**Specialist factors in this view:** " + "; ".join(factor_label(n) for n in factors))
+
+    with tabs[1]:
+        group_col = "Grade" if scope == "Whole Middle School" else "Homeroom"
+        summary = specialist_summary(current, schema, factors, group_col)
+        attention_chart(summary, group_col, f"{scope}: {role_name} review profile by {group_col.lower()}")
+        st.dataframe(summary, hide_index=True, use_container_width=True)
+        if has_history(history_df):
+            trend_title = "Whole Middle School: specialist trend over time" if scope == "Whole Middle School" else f"Current {scope} cohort: specialist PASS journey over time"
+            trend_line_chart(history, schema, trend_title, factors=factors)
+            if scope != "Whole Middle School":
+                st.caption("* Earlier year labels are inferred from the student's current year and survey date. Testwise stamps current year/group labels onto historical rows, so earlier points may be Primary results for current Year 6 students.")
+
+    with tabs[2]:
+        queue = specialist_priority_table(current, schema, factors, history_df if has_history(history_df) else None)
+        queue = queue[queue["Specialist priority"].isin(["Immediate review", "Targeted support", "Monitor"])].copy()
+        st.markdown("#### Review queue")
+        st.caption("Read the named factor columns first. The counts are secondary. A student appears here because at least one factor relevant to this specialist role is in an intervention/watch band.")
+        filter_priority = st.multiselect("Show priorities", ["Immediate review", "Targeted support", "Monitor"], default=["Immediate review", "Targeted support", "Monitor"], key=f"specialist_filter_{role_name}")
+        display_queue = queue[queue["Specialist priority"].isin(filter_priority)].copy()
+        preferred = [
+            "Student", "Student ID", "Grade", "Homeroom", "Specialist priority",
+            "Immediate concern factors (≤5th percentile)",
+            "Targeted concern factors (6th–20th percentile)",
+            "Watch factors (21st–30th percentile)",
+            "Why this is a concern",
+            "Longitudinal status",
+            "Repeated concern across survey waves",
+            "PASS waves available",
+            "Repeated concern meaning",
+        ]
+        st.dataframe(display_queue[[c for c in preferred if c in display_queue.columns]], hide_index=True, use_container_width=True)
+        downloadable_csv(display_queue, f"Download {role_name} review queue", f"{role_name.lower().replace(' ', '_')}_review_queue.csv", f"{role_name}_dl")
+        st.caption(queue_caption)
+
+    with tabs[3]:
+        specialist_guidance_panel(role_name)
+        st.divider()
+        st.markdown("### Put the intervention into action")
+        queue_for_actions = specialist_priority_table(current, schema, factors, history_df if has_history(history_df) else None)
+        queue_for_actions = queue_for_actions[queue_for_actions["Specialist priority"].isin(["Immediate review", "Targeted support", "Monitor"])].copy()
+        persistent_action_manager(
+            queue_for_actions,
+            role_name,
+            f"{role_name} | {scope}",
+            role_name.lower().replace(" ", "_"),
+            schema,
+            factors=factors,
+            latest_wave=current["Wave"].iloc[0],
+        )
+
+    with tabs[4]:
+        show_student_profile(current, history_df if has_history(history_df) else current, schema, role_name.lower().replace(' ', '_'), factors=factors)'''
+          pattern = r'def render_specialist\(.*?\n\ndef main\(\) -> None:'
+          if not re.search(pattern, text, flags=re.S):
+              raise SystemExit('render_specialist block not found')
+          text = re.sub(pattern, new_specialist + '\n\ndef main() -> None:', text, count=1, flags=re.S)
+
+          # Make factor table itself explicit.
+          old_table = 'display = fs[["Factor", "Factor name", "Median percentile", "% ≤5", "% ≤20", "% 21–30", "% ≥31", "Completed"]].copy()'
+          new_table = 'display = fs[["Factor", "Factor name", "Median percentile", "% ≤5", "% ≤20", "% 21–30", "% ≥31", "Completed"]].copy()\n    display.insert(0, "PASS factor", display.apply(lambda r: f"Factor {int(r[\'Factor\'])} – {r[\'Factor name\']}", axis=1))\n    display = display.drop(columns=["Factor", "Factor name"])'
+          if old_table in text:
+              text = text.replace(old_table, new_table, 1)
+
+          p.write_text(text)
+          PY
+
+          python -m py_compile app.py pass_logic.py storage.py
+
+      - name: Commit specialist redesign
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py pass_logic.py
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "Clarify specialist PASS views and add persistent action workflow"
+          git push
