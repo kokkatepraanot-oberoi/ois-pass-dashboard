@@ -293,6 +293,24 @@ def prepare_data(df: pd.DataFrame, schema: Schema) -> pd.DataFrame:
     out["Wave key"] = out["Wave sort"].dt.normalize().map(date_to_wave)
     out["Wave"] = pd.to_datetime(out["Wave key"]).dt.strftime("%b %Y")
 
+    # Testwise applies the student's CURRENT year/group to historical rows.
+    # Infer the year the student would have been in at each survey wave so
+    # cohort trend charts do not imply, for example, that a current Year 6
+    # student was already in Year 6 in 2024. This is an inferred progression
+    # based on academic-year movement and is labelled as such in the UI.
+    current_grade_num = pd.to_numeric(out["Grade"].str.extract(r"(\d+)")[0], errors="coerce")
+    wave_dates = pd.to_datetime(out["Wave key"], errors="coerce")
+    latest_wave_date = wave_dates.max()
+    if pd.notna(latest_wave_date):
+        latest_ay_start = latest_wave_date.year if latest_wave_date.month >= 7 else latest_wave_date.year - 1
+        wave_ay_start = wave_dates.dt.year.where(wave_dates.dt.month >= 7, wave_dates.dt.year - 1)
+        inferred_grade_num = current_grade_num - (latest_ay_start - wave_ay_start)
+        out["Grade at survey (inferred)"] = inferred_grade_num.apply(
+            lambda value: f"Year {int(value)}" if pd.notna(value) and value >= 1 else "Unknown"
+        )
+    else:
+        out["Grade at survey (inferred)"] = "Unknown"
+
     factor_columns = list(schema.factor_cols.values())
     for c in factor_columns:
         out[c] = pd.to_numeric(out[c], errors="coerce")

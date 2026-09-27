@@ -470,9 +470,21 @@ def trend_line_chart(history_df: pd.DataFrame, schema, title: str, factors: List
         st.info("Not enough historical survey waves for this trend view.")
         return
     trend["Series"] = trend["Factor"].apply(lambda n: f"F{int(n)}")
+    x_col = "Wave"
+    if "Grade at survey (inferred)" in history_df.columns and history_df["Grade"].nunique() == 1:
+        wave_context = (
+            history_df[["Wave", "Wave key", "Grade at survey (inferred)"]]
+            .sort_values("Wave key")
+            .drop_duplicates(subset=["Wave"], keep="last")
+        )
+        grade_map = dict(zip(wave_context["Wave"], wave_context["Grade at survey (inferred)"]))
+        trend["Wave display"] = trend["Wave"].map(
+            lambda wave: f"{wave}<br><sup>{grade_map.get(wave, '')}*</sup>"
+        )
+        x_col = "Wave display"
     fig = px.line(
         trend.sort_values("Wave sort"),
-        x="Wave",
+        x=x_col,
         y=value_col,
         color="Series",
         markers=True,
@@ -865,8 +877,9 @@ def render_gl(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema, allowed
 
     with tabs[1]:
         if has_history(history_df):
-            trend_line_chart(history, schema, f"{grade}: trend by factor (% at/under 20th percentile)")
-            transition_chart(history, schema, f"{grade}: latest wave vs previous wave")
+            trend_line_chart(history, schema, f"Current {grade} cohort: PASS journey over time (% at/under 20th percentile)")
+            st.caption("* Earlier year labels are inferred from the student’s current year and survey date because Testwise stamps the current year/group onto historical rows. For current Year 6, the 2024–26 points are Primary PASS results until Sep 2026.")
+            transition_chart(history, schema, f"Current {grade} cohort: latest wave vs previous wave")
         else:
             st.info("Upload a multi-wave PASS export to unlock grade trends.")
 
@@ -972,7 +985,10 @@ def render_specialist(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema,
         attention_chart(summary, group_col, f"{scope}: {role_name} review profile by {group_col.lower()}")
         st.dataframe(summary, hide_index=True, use_container_width=True)
         if has_history(history_df):
-            trend_line_chart(history, schema, f"{scope}: specialist trend over time", factors=factors)
+            trend_title = "Whole Middle School: specialist trend over time" if scope == "Whole Middle School" else f"Current {scope} cohort: specialist PASS journey over time"
+            trend_line_chart(history, schema, trend_title, factors=factors)
+            if scope != "Whole Middle School":
+                st.caption("* Earlier year labels are inferred from the student’s current year and survey date. Testwise stamps current year/group labels onto historical rows, so earlier points may be Primary results for current Year 6 students.")
 
     with tabs[2]:
         queue = specialist_priority_table(current, schema, factors, history_df if has_history(history_df) else None)
