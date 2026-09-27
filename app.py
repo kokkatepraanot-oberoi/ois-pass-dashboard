@@ -591,14 +591,34 @@ def student_summary_text(history_df: pd.DataFrame, student_id: str, schema, fact
 
 
 def show_student_profile(current_df: pd.DataFrame, history_df: pd.DataFrame, schema, key_prefix: str, factors: List[int] | None = None) -> None:
-    completed_sub = current_df[current_df["Completed PASS"]].copy()
+    completed_sub = current_df.copy()
+    if "Completed PASS" in completed_sub.columns:
+        completed_sub = completed_sub[completed_sub["Completed PASS"]].copy()
     if completed_sub.empty:
         st.info("No completed student profiles in this selection.")
         return
-    options = completed_sub[["Student", "Student ID"]].drop_duplicates().sort_values("Student")
-    display_names = options["Student"].tolist()
-    mapping = dict(zip(options["Student"], options["Student ID"]))
-    selected_name = st.selectbox("Select student", display_names, key=f"{key_prefix}_student")
+    if "Student" not in completed_sub.columns:
+        if schema.forename in completed_sub.columns and schema.surname in completed_sub.columns:
+            completed_sub["Student"] = (
+                completed_sub[schema.forename].fillna("").astype(str).str.strip()
+                + " "
+                + completed_sub[schema.surname].fillna("").astype(str).str.strip()
+            ).str.strip()
+        else:
+            st.warning("Student names are not available in this view.")
+            return
+    if "Student ID" not in completed_sub.columns:
+        if getattr(schema, "unique_id", "") and schema.unique_id in completed_sub.columns:
+            completed_sub["Student ID"] = completed_sub[schema.unique_id].fillna("").astype(str).str.strip()
+        else:
+            completed_sub["Student ID"] = completed_sub["Student"]
+    options = completed_sub.reindex(columns=["Student", "Student ID"]).dropna(subset=["Student"]).drop_duplicates().sort_values("Student")
+    if options.empty:
+        st.info("No student profiles are available in this selection.")
+        return
+    display_names = options["Student"].astype(str).tolist()
+    mapping = dict(zip(options["Student"].astype(str), options["Student ID"].astype(str)))
+    selected_name = st.selectbox("Select student", display_names, key=f"profile_{key_prefix}_student")
     student_id = mapping[selected_name]
     row = completed_sub[completed_sub["Student ID"] == student_id].iloc[0]
 
@@ -747,7 +767,10 @@ def specialist_priority_table(df: pd.DataFrame, schema, factors: List[int], hist
             "PASS waves available", "Most repeated concern factor", "Repeated concern pattern", "Repeated concern meaning", "Chronic factors",
             "Persistent factors", "New factors", "Recovered factors", "Deteriorating factors",
         ]
-        longi = longitudinal_status_table(history_df, df, schema, factors=factors)[long_cols]
+        longi_raw = longitudinal_status_table(history_df, df, schema, factors=factors)
+        if "Repeated concern across survey waves" not in longi_raw.columns and "Concern waves (max factor)" in longi_raw.columns:
+            longi_raw["Repeated concern across survey waves"] = longi_raw["Concern waves (max factor)"]
+        longi = longi_raw.reindex(columns=long_cols)
         out = out.merge(longi, on="Student ID", how="left")
     rank = {v: i for i, v in enumerate(ATTENTION_ORDER)}
     out["_rank"] = out["Specialist priority"].map(rank).fillna(99)
@@ -757,7 +780,7 @@ def specialist_priority_table(df: pd.DataFrame, schema, factors: List[int], hist
     ).drop(columns="_rank")
 
 def intervention_tracker(scope_label: str, key_prefix: str) -> None:
-    st.markdown("**Intervention tracker (session-based)**")
+    st.markdown("**Intervention planning workspace**")
     template = pd.DataFrame(
         [
             {
@@ -779,7 +802,7 @@ def intervention_tracker(scope_label: str, key_prefix: str) -> None:
     edited = st.data_editor(st.session_state[key], num_rows="dynamic", use_container_width=True, key=f"tracker_editor_{key_prefix}")
     st.session_state[key] = edited
     downloadable_csv(edited, f"Download {scope_label} intervention tracker", f"{key_prefix}_intervention_tracker.csv", f"dl_{key_prefix}")
-    st.caption("This tracker is session-based in Streamlit. For long-term storage, export the CSV and keep it in the school's protected workflow.")
+    st.caption("Use this as a temporary planning workspace until persistent OIS storage is connected.")
 
 
 def download_excel_bundle(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema, label: str, filename: str, key: str) -> None:
@@ -994,7 +1017,15 @@ def render_hrt(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema, allowe
         priorities = student_priority_table(current)
         queue = priorities[priorities["Attention"].isin(["Immediate review", "Targeted support", "Monitor", "Not completed"])].copy()
         if has_history(history_df):
-            longi = longitudinal_status_table(history_df, current, schema)[["Student ID", "Longitudinal status", "Repeated concern across survey waves", "PASS waves available", "Repeated concern meaning"]]
+            longi_raw = longitudinal_status_table(history_df, current, schema)
+            if "Repeated concern across survey waves" not in longi_raw.columns and "Concern waves (max factor)" in longi_raw.columns:
+                longi_raw["Repeated concern across survey waves"] = longi_raw["Concern waves (max factor)"]
+            long_cols = [
+                "Student ID", "Longitudinal status", "Repeated concern across survey waves",
+                "PASS waves available", "Most repeated concern factor",
+                "Repeated concern pattern", "Repeated concern meaning",
+            ]
+            longi = longi_raw.reindex(columns=long_cols)
             queue = queue.merge(longi, on="Student ID", how="left")
         st.dataframe(queue, hide_index=True, use_container_width=True)
         downloadable_csv(queue, f"Download {homeroom} check-in queue", f"homeroom_{homeroom}_pass_checkins.csv", "hrt_students_dl")
