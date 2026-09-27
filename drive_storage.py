@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import hashlib
-import json
+import io
 from typing import Dict, List, Optional
-from uuid import uuid4
 
 import streamlit as st
-from google.auth.transport.requests import AuthorizedSession
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
 
-# Shared Drive folder created for the dashboard's source PASS exports.
-DEFAULT_SOURCE_FOLDER_ID = "1clhramwdpF-GAIdunuJwNJRv8Vg6JuAG"
+# My Drive folder used for the dashboard's protected PASS source exports.
+DEFAULT_SOURCE_FOLDER_ID = "1OiLcZNjTEY-NkXhYtjUxolfTu8fJfcpE"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
 
 
 def source_storage_configured() -> bool:
@@ -22,55 +24,98 @@ def source_storage_configured() -> bool:
 def source_storage_status() -> str:
     if not st.secrets.get("gcp_service_account"):
         return "Google Drive source storage is waiting for the service-account credentials in Streamlit Secrets."
-    return "Connected"
+    return "Google Drive credentials are configured."
 
 
 def source_folder_id() -> str:
     config = st.secrets.get("pass_drive", {})
-    return str(config.get("folder_id", DEFAULT_SOURCE_FOLDER_ID))
+    return str(config.get("folder_id", DEFAULT_SOURCE_FOLDER_ID)).strip()
 
 
-def _session() -> AuthorizedSession:
+@st.cache_resource(show_spinner=False)
+def _drive_service():
     if not source_storage_configured():
         raise RuntimeError(source_storage_status())
+
     info = dict(st.secrets["gcp_service_account"])
-    creds = Credentials.from_service_account_info(
-        info,
-        scopes=["https://www.googleapis.com/auth/drive"],
-    )
-    return AuthorizedSession(creds)
+    required = {"type", "project_id", "private_key", "client_email", "token_uri"}
+    missing = sorted(required - set(info))
+    if missing:
+        raise RuntimeError(
+            "Google service-account configuration is incomplete. Missing: " + ", ".join(missing)
+        )
+
+    creds = Credentials.from_service_account_info(info, scopes=[DRIVE_SCOPE])
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
+
+
+def _drive_error(exc: Exception) -> RuntimeError:
+    if isinstance(exc, HttpError):
+        status = getattr(exc.resp, "status", None)
+        if status == 403:
+            return RuntimeError(
+                "Google Drive rejected the service-account request (403). Confirm that the Google Drive API is enabled in the 'ois-dashboards' Google Cloud project, the current service-account key is in Streamlit Secrets, and the PASS Dashboard Source Data folder is shared with pass-dashboard@ois-dashboards.iam.gserviceaccount.com as Editor."
+            )
+        if status == 404:
+            return RuntimeError(
+                "The configured PASS source folder/file could not be found by the service account. Check the folder ID and sharing permissions."
+            )
+    return RuntimeError(f"Google Drive source storage failed: {exc}")
+
+
+def verify_source_folder() -> Dict[str, object]:
+    """Verify the service account can see the configured source folder."""
+    try:
+        service = _drive_service()
+        return (
+            service.files()
+            .get(fileId=source_folder_id(), fields="id,name,mimeType,webViewLink")
+            .execute()
+        )
+    except Exception as exc:
+        raise _drive_error(exc) from exc
 
 
 def list_source_files(limit: int = 25) -> List[Dict[str, object]]:
-    session = _session()
-    folder_id = source_folder_id()
-    params = {
-        "q": f"'{folder_id}' in parents and trashed = false",
-        "orderBy": "modifiedTime desc",
-        "pageSize": max(1, min(int(limit), 100)),
-        "supportsAllDrives": "true",
-        "includeItemsFromAllDrives": "true",
-        "fields": "files(id,name,size,createdTime,modifiedTime,mimeType,webViewLink,appProperties)",
-    }
-    response = session.get("https://www.googleapis.com/drive/v3/files", params=params, timeout=30)
-    response.raise_for_status()
-    return response.json().get("files", [])
+    try:
+        service = _drive_service()
+        folder_id = source_folder_id()
+        result = (
+            service.files()
+            .list(
+                q=f"'{folder_id}' in parents and trashed = false",
+                orderBy="modifiedTime desc",
+                pageSize=max(1, min(int(limit), 100)),
+                fields="files(id,name,size,createdTime,modifiedTime,mimeType,webViewLink,appProperties)",
+            )
+            .execute()
+        )
+        return result.get("files", [])
+    except Exception as exc:
+        raise _drive_error(exc) from exc
 
 
 def latest_source_file() -> Optional[Dict[str, object]]:
-    files = [f for f in list_source_files() if f.get("mimeType") == XLSX_MIME or str(f.get("name", "")).lower().endswith(".xlsx")]
+    files = [
+        f
+        for f in list_source_files()
+        if f.get("mimeType") == XLSX_MIME or str(f.get("name", "")).lower().endswith(".xlsx")
+    ]
     return files[0] if files else None
 
 
 def download_source_file(file_id: str) -> bytes:
-    session = _session()
-    response = session.get(
-        f"https://www.googleapis.com/drive/v3/files/{file_id}",
-        params={"alt": "media", "supportsAllDrives": "true"},
-        timeout=60,
-    )
-    response.raise_for_status()
-    return response.content
+    try:
+        service = _drive_service()
+        request = service.files().get_media(fileId=file_id)
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        return buffer.getvalue()
+    except Exception as exc:
+        raise _drive_error(exc) from exc
 
 
 def _existing_by_hash(file_hash: str) -> Optional[Dict[str, object]]:
@@ -93,12 +138,9 @@ def save_source_file(
     if existing:
         return existing
 
-    session = _session()
-    folder_id = source_folder_id()
-    boundary = f"pass-{uuid4().hex}"
     metadata = {
         "name": file_name,
-        "parents": [folder_id],
+        "parents": [source_folder_id()],
         "mimeType": XLSX_MIME,
         "appProperties": {
             "sha256": file_hash,
@@ -108,25 +150,18 @@ def save_source_file(
             "source": "ois-pass-dashboard",
         },
     }
-    prefix = (
-        f"--{boundary}\r\n"
-        "Content-Type: application/json; charset=UTF-8\r\n\r\n"
-        f"{json.dumps(metadata)}\r\n"
-        f"--{boundary}\r\n"
-        f"Content-Type: {XLSX_MIME}\r\n\r\n"
-    ).encode("utf-8")
-    suffix = f"\r\n--{boundary}--\r\n".encode("utf-8")
-    body = prefix + file_bytes + suffix
-    response = session.post(
-        "https://www.googleapis.com/upload/drive/v3/files",
-        params={
-            "uploadType": "multipart",
-            "supportsAllDrives": "true",
-            "fields": "id,name,size,createdTime,modifiedTime,mimeType,webViewLink,appProperties",
-        },
-        data=body,
-        headers={"Content-Type": f"multipart/related; boundary={boundary}"},
-        timeout=90,
-    )
-    response.raise_for_status()
-    return response.json()
+
+    try:
+        service = _drive_service()
+        media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=XLSX_MIME, resumable=False)
+        return (
+            service.files()
+            .create(
+                body=metadata,
+                media_body=media,
+                fields="id,name,size,createdTime,modifiedTime,mimeType,webViewLink,appProperties",
+            )
+            .execute()
+        )
+    except Exception as exc:
+        raise _drive_error(exc) from exc
