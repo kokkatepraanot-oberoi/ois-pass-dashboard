@@ -15,16 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply patches
+      - name: Apply runtime stability patch
         run: |
-          python .github/scripts/patch_labels.py
-          python .github/scripts/patch_specialist_queue.py
-          python .github/scripts/patch_specialist_render.py
-          python .github/scripts/patch_persistence.py
-          python .github/scripts/patch_specialist_metrics.py
-          python .github/scripts/patch_explicit_labels.py
-          python .github/scripts/patch_plain_english.py
-          python .github/scripts/patch_repeated_factor.py
           python .github/scripts/patch_runtime_stability.py
           python -m py_compile app.py pass_logic.py storage.py specialist_guidance.py persistent_actions.py
       - name: Commit changes
