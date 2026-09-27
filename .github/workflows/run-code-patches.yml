@@ -19,6 +19,7 @@ jobs:
         run: |
           python .github/scripts/patch_runtime_stability.py
           python .github/scripts/patch_drive_source.py
+          python .github/scripts/patch_navigation_ui.py
           python -m py_compile app.py pass_logic.py storage.py specialist_guidance.py persistent_actions.py drive_storage.py
       - name: Commit changes
         run: |
@@ -29,5 +30,5 @@ jobs:
             echo "No changes to commit."
             exit 0
           fi
-          git commit -m "Persist PASS source files in OIS Drive"
+          git commit -m "Upgrade PASS dashboard navigation UI"
           git push
