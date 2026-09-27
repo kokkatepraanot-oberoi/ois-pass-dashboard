@@ -44,6 +44,7 @@ from drive_storage import (
     source_storage_configured,
     source_storage_status,
 )
+from role_access import resolve_role_access
 
 
 st.set_page_config(
@@ -83,7 +84,7 @@ LEARNING_SUPPORT_FACTORS = [2, 3, 4, 6, 7, 9]
 COUNSELLOR_FACTORS = [1, 3, 5, 7, 8]
 
 HOMEROOM_TEACHERS = {
-    "6.1": "Shruti Uniyal",
+    "6.1": "Shruti Unial",
     "6.2": "Jigna Doshi",
     "6.3": "Neha Kapadia",
     "6.4": "Sneha Sundrani",
@@ -110,10 +111,7 @@ HOMEROOM_TEACHERS = {
 
 ALLOWED_GOOGLE_DOMAIN = "oberoi-is.org"
 
-# Project owner / SLT administrator. Additional roles should be configured in
-# Streamlit secrets rather than hard-coded into the repository.
-DEFAULT_ADMIN_EMAILS = {"praanot.kokkate@oberoi-is.org"}
-ALL_VIEWS = ["SLT", "Grade Level Leader", "Homeroom Teacher", "Learning Support", "Counsellor"]
+# Role permissions are maintained in the protected PASS Role Access Google Sheet.
 
 
 def logout_and_clear() -> None:
@@ -123,82 +121,10 @@ def logout_and_clear() -> None:
     st.logout()
 
 
-def _normalise_person(value: str) -> str:
-    return " ".join(str(value or "").strip().casefold().split())
-
-
-def _secret_list(value) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [x.strip().casefold() for x in value.split(",") if x.strip()]
-    try:
-        return [str(x).strip().casefold() for x in value if str(x).strip()]
-    except TypeError:
-        return []
-
-
 def resolve_access() -> dict:
-    """Resolve role permissions from Google identity + Streamlit secrets.
-
-    Secrets may contain:
-      [roles]
-      slt = ["name@oberoi-is.org"]
-      learning_support = ["name@oberoi-is.org"]
-      counsellor = ["name@oberoi-is.org"]
-
-      [roles.grade_leaders]
-      "name@oberoi-is.org" = ["Year 6"]
-
-      [roles.homerooms]
-      "name@oberoi-is.org" = ["6.1"]
-    """
+    """Resolve exact email-based permissions from the PASS Role Access register."""
     email = str(st.session_state.get("staff_email", "")).strip().casefold()
-    name = _normalise_person(st.session_state.get("staff_name", ""))
-    roles = st.secrets.get("roles", {})
-    admin_emails = set(DEFAULT_ADMIN_EMAILS) | set(_secret_list(roles.get("admin", [])))
-
-    if email in admin_emails or email in set(_secret_list(roles.get("slt", []))):
-        return {"views": ALL_VIEWS.copy(), "grades": None, "homerooms": None, "is_admin": True}
-
-    views: list[str] = []
-    grades: list[str] = []
-    homerooms: list[str] = []
-
-    if email in set(_secret_list(roles.get("learning_support", []))):
-        views.append("Learning Support")
-    if email in set(_secret_list(roles.get("counsellor", []))):
-        views.append("Counsellor")
-
-    grade_map = roles.get("grade_leaders", {})
-    try:
-        configured_grades = grade_map.get(email, [])
-    except Exception:
-        configured_grades = []
-    if isinstance(configured_grades, str):
-        configured_grades = [configured_grades]
-    grades = [str(g).strip() for g in configured_grades if str(g).strip()]
-    if grades:
-        views.append("Grade Level Leader")
-
-    homeroom_map = roles.get("homerooms", {})
-    try:
-        configured_homerooms = homeroom_map.get(email, [])
-    except Exception:
-        configured_homerooms = []
-    if isinstance(configured_homerooms, str):
-        configured_homerooms = [configured_homerooms]
-    homerooms = [str(h).strip() for h in configured_homerooms if str(h).strip()]
-
-    # Safe convenience: infer an HRT's own homeroom from their verified Google display name.
-    if not homerooms:
-        homerooms = [hr for hr, teacher in HOMEROOM_TEACHERS.items() if _normalise_person(teacher) == name]
-    if homerooms:
-        views.append("Homeroom Teacher")
-
-    # De-duplicate while preserving order.
-    views = list(dict.fromkeys(views))
-    return {"views": views, "grades": grades or None, "homerooms": homerooms or None, "is_admin": False}
+    return resolve_role_access(email)
 
 
 def apply_theme() -> None:
@@ -1179,7 +1105,14 @@ def render_specialist(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema,
 def main() -> None:
     apply_theme()
     google_auth_gate()
-    access = resolve_access()
+    try:
+        access = resolve_access()
+    except Exception:
+        with st.sidebar:
+            st.error("The PASS role-access register is temporarily unavailable, so access has been stopped safely.")
+            st.caption("Please contact the dashboard administrator. No PASS data has been shown.")
+            st.button("Sign out / switch Google account", on_click=logout_and_clear, type="primary", use_container_width=True, key="role_register_logout")
+        st.stop()
     if not access["views"]:
         with st.sidebar:
             st.error("Your Google account is authenticated, but no PASS dashboard role has been assigned to it.")
@@ -1289,7 +1222,7 @@ def main() -> None:
         if len(access["views"]) == 1:
             st.caption(f"Role: **{role}**")
         interpretation_note()
-        st.caption("Views are now permission-controlled from the signed-in Google identity. HRT access is restricted to assigned homerooms; GL access can be restricted to assigned grades.")
+        st.caption("Views are permission-controlled from the protected PASS Role Access register using the signed-in OIS email. HRTs see their assigned homeroom; GLs see their grade plus the HRT view for all homerooms in that grade.")
 
     if role == "SLT":
         render_slt(latest_df, history_df, schema)
