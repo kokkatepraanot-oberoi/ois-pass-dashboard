@@ -1,43 +1,42 @@
 # PASS dashboard role configuration
 
-Google Workspace authentication confirms identity. Role permissions are then resolved inside the app.
+Google Workspace authentication confirms identity. Role permissions are then resolved by exact OIS email address from the protected **PASS Role Access** Google Sheet.
 
-Praanot's school account is retained as the initial dashboard administrator. Additional access should be added in **Streamlit → Manage app → Settings → Secrets**, never committed to GitHub.
+The role register is stored in the same **PASS Dashboard Source Data** folder as the PASS source dataset and intervention store. It is shared with the PASS dashboard service account so the Streamlit app can read it securely.
 
-Example:
+## Role register
 
-```toml
-[auth]
-redirect_uri = "https://ois-pass.streamlit.app/oauth2callback"
-cookie_secret = "..."
-client_id = "..."
-client_secret = "..."
-server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+Google Sheet: **PASS Role Access**  
+Spreadsheet ID: `12nxD-6wpi3KjdQSUqCxVW0kX4fM0tU9jgtPGN27U1DY`  
+Worksheet: `Access`
 
-[roles]
-admin = ["another.admin@oberoi-is.org"]
-slt = ["secondary.leader@oberoi-is.org"]
-learning_support = ["learning.support@oberoi-is.org"]
-counsellor = ["counsellor@oberoi-is.org"]
+Columns:
 
-[roles.grade_leaders]
-"grade6.leader@oberoi-is.org" = ["Year 6"]
-"grade7.leader@oberoi-is.org" = ["Year 7"]
-"grade8.leader@oberoi-is.org" = ["Year 8"]
+- `Name`
+- `Email`
+- `Role`
+- `Scope`
+- `Active`
+- `Notes`
 
-[roles.homerooms]
-"teacher@oberoi-is.org" = ["6.1"]
-```
-
-## HRT convenience mapping
-
-If an HRT email is not explicitly listed under `[roles.homerooms]`, the app attempts a safe exact-name match between the verified Google display name and the 2026–27 HRT mapping built into the app. If there is no match, the user gets no PASS access until configured.
+Use `Yes` in **Active** to grant access. Changing a row to `No` (or removing it) removes that assignment after the short access-cache period.
 
 ## Access behaviour
 
-- **SLT/admin:** full dashboard access.
-- **Grade Level Leader:** only assigned grade(s).
-- **Homeroom Teacher:** only assigned homeroom(s).
-- **Learning Support:** specialist Learning Support view.
-- **Counsellor:** specialist Counsellor view.
-- **Authenticated OIS account with no role:** no PASS data is shown.
+- **Admin:** all five dashboard views and the full Middle School dataset.
+- **Grade Level Leader:** Grade Level Leader view for the assigned grade **plus the Homeroom Teacher view for every active homeroom in that grade**.
+- **Homeroom Teacher:** Homeroom Teacher view for the assigned homeroom(s) only.
+- **Learning Support:** Learning Support specialist view.
+- **Counsellor:** Counsellor specialist view.
+- **Multiple assignments:** permissions are combined. For example, a member of Learning Support who is also an HRT receives both views.
+- **Authenticated OIS account with no active role row:** no PASS data is shown.
+
+Role access is now email-based only. The previous Streamlit Secrets role lists and Google display-name HRT fallback are no longer used for normal access decisions.
+
+## Administration
+
+Praanot Kokkate and Roma Bhargava are the current administrators in the role register. They are also retained as break-glass administrators so the dashboard can still be accessed to diagnose a role-register connection failure.
+
+Normal role changes should be made by editing **PASS Role Access**, not by changing application code or Streamlit Secrets.
+
+The service account used by the dashboard must retain access to the role register and the Google Sheets API must remain enabled for the `ois-dashboards` Google Cloud project.
