@@ -608,11 +608,12 @@ def show_student_profile(current_df: pd.DataFrame, history_df: pd.DataFrame, sch
     c4.metric("Lowest percentile", f"{row['Lowest percentile']:.1f}")
 
     profile = student_factor_profile(row, schema)
+    profile["PASS factor"] = profile.apply(lambda r: f"Factor {int(r['Factor'])} – {r['Factor name']}", axis=1)
     if factors:
         profile = profile[profile["Factor"].isin(factors)]
     fig = px.bar(
         profile,
-        x="Factor name",
+        x="PASS factor",
         y="Percentile",
         color="Band",
         category_orders={"Band": ["Low", "Low-moderate", "Moderate", "High"]},
@@ -652,7 +653,7 @@ def show_student_profile(current_df: pd.DataFrame, history_df: pd.DataFrame, sch
             for bullet in student_summary_text(history_df, student_id, schema, factors=factors):
                 st.markdown(f"- {bullet}")
 
-    st.dataframe(profile[["Factor", "Factor name", "Percentile", "Band", "Description"]], hide_index=True, use_container_width=True)
+    st.dataframe(profile[["PASS factor", "Percentile", "Band", "Description"]], hide_index=True, use_container_width=True)
     st.markdown("**Useful student questions**")
     for _, r in profile.sort_values("Percentile", na_position="last").head(2).iterrows():
         item = INTERVENTIONS[int(r["Factor"])]
@@ -717,7 +718,7 @@ def specialist_summary(df: pd.DataFrame, schema, factors: List[int], group_col: 
     for group, sub in working.groupby(group_col, dropna=False):
         completed = int(sub["Completed PASS"].sum())
         total = len(sub)
-        counts = sub["Domain attention"].astype(str).value_counts()
+        counts = sub["Specialist priority"].astype(str).value_counts()
         item = {group_col: group, "Students": total, "Completed": completed}
         for label in ATTENTION_ORDER:
             item[label] = int(counts.get(label, 0))
@@ -992,7 +993,7 @@ def render_hrt(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema, allowe
         priorities = student_priority_table(current)
         queue = priorities[priorities["Attention"].isin(["Immediate review", "Targeted support", "Monitor", "Not completed"])].copy()
         if has_history(history_df):
-            longi = longitudinal_status_table(history_df, current, schema)[["Student ID", "Longitudinal status", "Concern waves (max factor)"]]
+            longi = longitudinal_status_table(history_df, current, schema)[["Student ID", "Longitudinal status", "Repeated concern across survey waves", "PASS waves available", "Repeated concern meaning"]]
             queue = queue.merge(longi, on="Student ID", how="left")
         st.dataframe(queue, hide_index=True, use_container_width=True)
         downloadable_csv(queue, f"Download {homeroom} check-in queue", f"homeroom_{homeroom}_pass_checkins.csv", "hrt_students_dl")
@@ -1018,7 +1019,17 @@ def render_specialist(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema,
     history = history_df.copy() if scope == "Whole Middle School" else history_df[history_df["Grade"] == scope].copy()
     st.markdown(f'<div class="ois-callout"><b>{role_name}:</b> {intro}</div>', unsafe_allow_html=True)
     render_reading_guide(role_name)
-    metric_strip(current, extra_label="Specialist factors", extra_value=len(factors))
+    specialist_current = build_domain_data(current, schema, factors)
+    total = len(specialist_current)
+    completed = int(specialist_current["Completed PASS"].sum())
+    immediate = int((specialist_current["Specialist priority"] == "Immediate review").sum())
+    targeted = int((specialist_current["Specialist priority"] == "Targeted support").sum())
+    metric_cols = st.columns(5)
+    metric_cols[0].metric("Students", total)
+    metric_cols[1].metric("PASS completed", f"{completed} ({100*completed/total:.1f}%)" if total else "0")
+    metric_cols[2].metric("Specialist immediate review", immediate)
+    metric_cols[3].metric("Specialist targeted support", targeted)
+    metric_cols[4].metric("Factors in this specialist lens", len(factors))
     tabs = st.tabs(["Profile", "Cohort patterns", "Review queue", "How to intervene", "Student explorer"])
 
     with tabs[0]:
