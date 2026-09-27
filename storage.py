@@ -15,6 +15,11 @@ except ImportError:  # handled cleanly in the UI
     Credentials = None
 
 
+# Default OIS PASS persistent intervention/review store.
+# This Sheet is shared directly with the PASS dashboard service account.
+DEFAULT_SPREADSHEET_ID = "1kP4Ehre5uuFbvriJhjqvuYyuHqN5xOOzxiqo8Ax__r0"
+DEFAULT_WORKSHEET = "Records"
+
 RECORD_HEADERS = [
     "Record ID",
     "Created at",
@@ -47,17 +52,26 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _storage_config() -> tuple[str, str]:
+    config = st.secrets.get("pass_storage", {}) or {}
+    spreadsheet_id = str(config.get("spreadsheet_id", DEFAULT_SPREADSHEET_ID)).strip()
+    worksheet_name = str(config.get("worksheet", DEFAULT_WORKSHEET)).strip() or DEFAULT_WORKSHEET
+    return spreadsheet_id, worksheet_name
+
+
 def storage_configured() -> bool:
-    return bool(st.secrets.get("pass_storage")) and bool(st.secrets.get("gcp_service_account"))
+    spreadsheet_id, _ = _storage_config()
+    return bool(spreadsheet_id) and bool(st.secrets.get("gcp_service_account"))
 
 
 def storage_status() -> str:
     if gspread is None or Credentials is None:
         return "Google Sheets storage libraries are not installed."
-    if not st.secrets.get("pass_storage"):
-        return "PASS storage sheet is not configured in Streamlit secrets."
     if not st.secrets.get("gcp_service_account"):
         return "Google service-account credentials are not configured in Streamlit secrets."
+    spreadsheet_id, _ = _storage_config()
+    if not spreadsheet_id:
+        return "PASS intervention storage is not configured."
     return "Connected"
 
 
@@ -75,9 +89,8 @@ def _worksheet():
     ]
     creds = Credentials.from_service_account_info(service_info, scopes=scopes)
     client = gspread.authorize(creds)
-    config = st.secrets["pass_storage"]
-    spreadsheet = client.open_by_key(str(config["spreadsheet_id"]))
-    worksheet_name = str(config.get("worksheet", "Records"))
+    spreadsheet_id, worksheet_name = _storage_config()
+    spreadsheet = client.open_by_key(spreadsheet_id)
     return spreadsheet.worksheet(worksheet_name)
 
 
