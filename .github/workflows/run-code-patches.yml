@@ -15,17 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply PASS patches
+      - name: Apply PASS UI patch
         run: |
-          python .github/scripts/patch_runtime_stability.py
-          python .github/scripts/patch_drive_source.py
           python .github/scripts/patch_navigation_ui.py
           python -m py_compile app.py pass_logic.py storage.py specialist_guidance.py persistent_actions.py drive_storage.py
       - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py pass_logic.py drive_storage.py
+          git add app.py
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
