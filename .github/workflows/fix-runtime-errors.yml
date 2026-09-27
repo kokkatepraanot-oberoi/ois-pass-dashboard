@@ -1,0 +1,54 @@
+name: Fix PASS runtime errors
+
+on:
+  push:
+    paths:
+      - '.fix-runtime-trigger'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch duplicate keys and longitudinal queue column
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('app.py')
+          text = p.read_text()
+
+          old_tracker = 'edited = st.data_editor(st.session_state[key], num_rows="dynamic", use_container_width=True, key=f"editor_{key_prefix}")'
+          new_tracker = 'edited = st.data_editor(st.session_state[key], num_rows="dynamic", use_container_width=True, key=f"tracker_editor_{key_prefix}")'
+          if old_tracker not in text:
+              raise SystemExit('Intervention tracker editor line not found.')
+          text = text.replace(old_tracker, new_tracker, 1)
+
+          count = text.count('"Waves with concern"')
+          if count == 0:
+              raise SystemExit('Longitudinal queue column references not found.')
+          text = text.replace('"Waves with concern"', '"Concern waves (max factor)"')
+
+          p.write_text(text)
+          print(f'Patched intervention key and {count} longitudinal column reference(s).')
+          PY
+
+          python -m py_compile app.py pass_logic.py
+
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "Fix PASS tab runtime errors"
+          git push
