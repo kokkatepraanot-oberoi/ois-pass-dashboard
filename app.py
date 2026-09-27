@@ -257,27 +257,59 @@ def apply_theme() -> None:
             padding: 1rem 1.05rem;
             margin-bottom: 1rem;
         }
+        .ois-nav-label {
+            display:flex; align-items:center; gap:.55rem;
+            margin: .95rem 0 .45rem 0;
+            color:#334155; font-size:.78rem; font-weight:800;
+            letter-spacing:.08em; text-transform:uppercase;
+        }
+        .ois-nav-label::before {
+            content:""; width:8px; height:8px; border-radius:999px;
+            background:linear-gradient(135deg,#007aff,#5ac8fa);
+            box-shadow:0 0 0 5px rgba(0,122,255,.10);
+        }
         div.stTabs [data-baseweb="tab-list"] {
-            gap: 0.55rem;
-            background: rgba(255,255,255,0.48);
-            padding: .4rem;
-            border-radius: 18px;
-            border: 1px solid rgba(255,255,255,.66);
-            backdrop-filter: blur(16px);
+            gap: .7rem;
+            background: rgba(241,245,249,.72);
+            padding: .55rem;
+            border-radius: 22px;
+            border: 1px solid rgba(148,163,184,.22);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.88), 0 10px 30px rgba(15,23,42,.06);
+            backdrop-filter: blur(20px);
+            overflow-x:auto;
+            scrollbar-width: thin;
         }
         div.stTabs [data-baseweb="tab"] {
-            height: 44px;
-            border-radius: 14px;
-            background: rgba(255,255,255,0.26);
+            min-height: 54px;
+            min-width: 145px;
+            border-radius: 16px;
+            background: rgba(255,255,255,.82);
+            border: 1px solid rgba(148,163,184,.24);
             padding: 0 18px;
-            color: #4b5563;
-            font-weight: 600;
+            color: #334155;
+            font-weight: 700;
+            font-size: .92rem;
+            box-shadow: 0 5px 14px rgba(15,23,42,.05);
+            transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;
+            white-space: nowrap;
+        }
+        div.stTabs [data-baseweb="tab"]:hover {
+            transform: translateY(-1px);
+            border-color: rgba(0,122,255,.30);
+            box-shadow: 0 8px 20px rgba(15,23,42,.09);
+            background: rgba(255,255,255,.98);
         }
         div.stTabs [aria-selected="true"] {
-            background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(243,247,255,0.82));
-            color: #0f172a;
-            box-shadow: 0 6px 16px rgba(0,122,255,0.12);
+            background: linear-gradient(135deg, #007aff 0%, #3998ff 100%) !important;
+            color: #ffffff !important;
+            border-color: rgba(0,122,255,.75) !important;
+            box-shadow: 0 10px 24px rgba(0,122,255,.26) !important;
+            transform: translateY(-1px);
         }
+        div.stTabs [aria-selected="true"] p,
+        div.stTabs [aria-selected="true"] span {color:#ffffff !important;}
+        div.stTabs [data-baseweb="tab-highlight"] {display:none;}
+        div.stTabs [data-baseweb="tab-border"] {display:none;}
         .stButton > button, .stDownloadButton > button {
             border-radius: 14px;
             border: 1px solid rgba(255,255,255,0.72);
@@ -310,8 +342,9 @@ def apply_theme() -> None:
             .block-container {padding-left: .75rem; padding-right: .75rem;}
             .ois-hero {padding: 1rem 1.05rem; border-radius: 22px;}
             .ois-hero h1 {font-size: 1.55rem !important;}
-            div.stTabs [data-baseweb="tab-list"] {overflow-x: auto; flex-wrap: nowrap;}
-            div.stTabs [data-baseweb="tab"] {padding: 0 12px; white-space: nowrap;}
+            div.stTabs [data-baseweb="tab-list"] {overflow-x: auto; flex-wrap: nowrap; gap:.45rem; padding:.45rem;}
+            div.stTabs [data-baseweb="tab"] {padding: 0 13px; white-space: nowrap; min-width: 132px; min-height:50px; font-size:.86rem;}
+            .ois-nav-label {margin-top:.75rem;}
         }
         </style>
         """,
@@ -876,7 +909,8 @@ def workflow_editor(seed_df: pd.DataFrame, key_prefix: str, heading: str = "Acti
 def render_slt(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema) -> None:
     st.markdown('<div class="ois-callout"><b>SLT:</b> focus on patterns, capacity and whole-school response — not named student casework.</div>', unsafe_allow_html=True)
     metric_strip(latest_df, extra_label="Survey waves", extra_value=history_df["Wave"].nunique())
-    tabs = st.tabs(["School picture", "Trends over time", "Emerging vs persistent", "Grade comparison", "Homeroom variation", "Intervention priorities"])
+    st.markdown('<div class="ois-nav-label">Navigate this SLT view</div>', unsafe_allow_html=True)
+    tabs = st.tabs(["🏫 School picture", "📈 Trends over time", "🔁 Emerging & persistent", "🎓 Grade comparison", "👥 Homeroom variation", "🎯 Intervention priorities"])
 
     with tabs[0]:
         fs = factor_summary(latest_df, schema)
@@ -948,7 +982,8 @@ def render_gl(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema, allowed
     history = history_df[history_df["Grade"] == grade].copy() if has_history(history_df) else current.copy()
     st.markdown('<div class="ois-callout"><b>GL:</b> diagnose the grade, identify students/cohorts needing follow-up, and allocate interventions clearly.</div>', unsafe_allow_html=True)
     metric_strip(current, extra_label="Homerooms", extra_value=current["Homeroom"].nunique())
-    tabs = st.tabs(["Current picture", "Trends over time", "Student journey table", "Homerooms", "Intervention planner", "Student explorer"])
+    st.markdown('<div class="ois-nav-label">Navigate this grade view</div>', unsafe_allow_html=True)
+    tabs = st.tabs(["📊 Current picture", "📈 Trends over time", "🧭 Student journeys", "🏫 Homerooms", "🎯 Intervention planner", "👤 Student explorer"])
 
     with tabs[0]:
         fs = factor_summary(current, schema)
@@ -1001,7 +1036,8 @@ def render_hrt(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema, allowe
     st.caption(f"Homeroom teacher: **{HOMEROOM_TEACHERS.get(homeroom, 'HRT not mapped')}**")
     st.markdown('<div class="ois-callout"><b>HRT:</b> keep this simple — know which students need a conversation, what the likely pattern is, and what your first action should be.</div>', unsafe_allow_html=True)
     metric_strip(current, extra_label="Students in homeroom", extra_value=len(current))
-    tabs = st.tabs(["My homeroom", "Student journey", "Check-in queue", "Interventions", "Student explorer"])
+    st.markdown('<div class="ois-nav-label">Navigate your homeroom workflow</div>', unsafe_allow_html=True)
+    tabs = st.tabs(["🏠 My homeroom", "🧭 Student journey", "💬 Check-in queue", "🛠 Interventions", "👤 Student explorer"])
 
     with tabs[0]:
         fs = factor_summary(current, schema)
@@ -1069,7 +1105,8 @@ def render_specialist(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema,
     metric_cols[2].metric("Specialist immediate review", immediate)
     metric_cols[3].metric("Specialist targeted support", targeted)
     metric_cols[4].metric("Factors in this specialist lens", len(factors))
-    tabs = st.tabs(["Profile", "Cohort patterns", "Review queue", "How to intervene", "Student explorer"])
+    st.markdown(f'<div class="ois-nav-label">Navigate the {role_name} workflow</div>', unsafe_allow_html=True)
+    tabs = st.tabs(["📊 Profile", "👥 Cohort patterns", "📋 Review queue", "🛠 How to intervene", "👤 Student explorer"])
 
     with tabs[0]:
         fs = factor_summary(current, schema)
