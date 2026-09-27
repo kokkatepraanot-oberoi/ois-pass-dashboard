@@ -37,6 +37,13 @@ from specialist_guidance import (
 )
 
 from persistent_actions import render_action_manager
+from drive_storage import (
+    download_source_file,
+    latest_source_file,
+    save_source_file,
+    source_storage_configured,
+    source_storage_status,
+)
 
 
 st.set_page_config(
@@ -1128,27 +1135,92 @@ def render_specialist(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema,
 def main() -> None:
     apply_theme()
     google_auth_gate()
+    access = resolve_access()
+    if not access["views"]:
+        with st.sidebar:
+            st.error("Your Google account is authenticated, but no PASS dashboard role has been assigned to it.")
+            st.caption("Ask the dashboard administrator to add your school email to the role configuration.")
+        st.stop()
+
+    source_file = None
+    uploaded = None
+    saved_source = None
+    storage_ready = source_storage_configured()
 
     with st.sidebar:
         st.caption(f"Signed in as **{st.session_state.get('staff_name', 'OIS staff')}**")
         st.caption(st.session_state.get("staff_email", ""))
         st.button("Log out", on_click=st.logout, use_container_width=True)
         st.divider()
-        st.header("1. Load PASS data")
-        uploaded = st.file_uploader("Upload Testwise PASS Excel export", type=["xlsx"])
-        st.caption("A single-wave export will run the core dashboard. A multi-wave export unlocks longitudinal analysis.")
+        st.header("1. PASS data")
 
-    if not uploaded:
-        st.markdown('<div class="ois-hero"><h1 style="margin:0">OIS Middle School PASS Dashboard</h1><div class="ois-subtitle">Upload a PASS export to begin. The app supports current snapshots and multi-wave historical analysis.</div></div>', unsafe_allow_html=True)
+        if storage_ready:
+            try:
+                saved_source = latest_source_file()
+            except Exception as exc:
+                st.warning(f"Saved PASS data could not be reached: {exc}")
+                saved_source = None
+
+            if saved_source:
+                props = saved_source.get("appProperties") or {}
+                st.success(f"Current saved dataset: {saved_source.get('name', 'PASS export')}")
+                details = []
+                if props.get("row_count"):
+                    details.append(f"{props['row_count']} rows")
+                if props.get("waves"):
+                    details.append(str(props["waves"]))
+                if details:
+                    st.caption(" | ".join(details))
+                if saved_source.get("modifiedTime"):
+                    st.caption(f"Drive updated: {saved_source['modifiedTime']}")
+            else:
+                st.info("No saved PASS dataset is available yet.")
+
+            if access.get("is_admin"):
+                uploaded = st.file_uploader("Upload newer Testwise PASS Excel export", type=["xlsx"], key="pass_admin_upload")
+                st.caption("A valid upload is saved to the protected OIS PASS Dashboard Source Data folder and becomes the current dataset.")
+            else:
+                st.caption("The PASS source file is managed by SLT. You automatically use the current saved dataset.")
+
+            if uploaded is not None:
+                source_file = io.BytesIO(uploaded.getvalue())
+            elif saved_source:
+                try:
+                    source_file = io.BytesIO(download_source_file(str(saved_source["id"])))
+                except Exception as exc:
+                    st.error(f"The saved PASS dataset could not be loaded: {exc}")
+        else:
+            uploaded = st.file_uploader("Upload Testwise PASS Excel export", type=["xlsx"], key="pass_manual_upload")
+            st.caption("Persistent OIS Drive storage is not connected yet, so this upload is temporary for this session.")
+            if uploaded is not None:
+                source_file = io.BytesIO(uploaded.getvalue())
+            if access.get("is_admin"):
+                st.caption(source_storage_status())
+
+    if source_file is None:
+        st.markdown('<div class="ois-hero"><h1 style="margin:0">OIS Middle School PASS Dashboard</h1><div class="ois-subtitle">No current PASS dataset is available yet.</div></div>', unsafe_allow_html=True)
         st.markdown('<div class="ois-panel"><b>Designed for five layers of use</b><ul><li>SLT: school climate, trend patterns and intervention load</li><li>Grade Level Leaders: grade diagnosis, student journeys and action planning</li><li>Homeroom Teachers: homeroom picture, check-in queue and student conversations</li><li>Learning Support: access-to-learning patterns and review queue</li><li>Counsellors: pastoral/relational patterns and contextual review queue</li></ul></div>', unsafe_allow_html=True)
         interpretation_note()
         st.stop()
 
     try:
-        history_df, schema, sheet_name = load_pass_excel(uploaded)
+        history_df, schema, sheet_name = load_pass_excel(source_file)
     except Exception as exc:
         st.error(f"Could not read this PASS export: {exc}")
         st.stop()
+
+    if uploaded is not None and storage_ready and access.get("is_admin"):
+        try:
+            saved = save_source_file(
+                uploaded.getvalue(),
+                uploaded.name,
+                uploaded_by=st.session_state.get("staff_email", ""),
+                row_count=len(history_df),
+                waves=available_waves(history_df),
+            )
+            st.sidebar.success(f"Saved to OIS Drive: {saved.get('name', uploaded.name)}")
+        except Exception as exc:
+            st.sidebar.warning(f"The file was analysed, but Drive storage could not save it: {exc}")
 
     latest_df = latest_snapshot(history_df)
     hero(latest_df, history_df)
@@ -1159,11 +1231,6 @@ def main() -> None:
         waves = available_waves(history_df)
         st.caption("Available waves: " + ", ".join(waves))
         st.header("2. Your view")
-        access = resolve_access()
-        if not access["views"]:
-            st.error("Your Google account is authenticated, but no PASS dashboard role has been assigned to it.")
-            st.caption("Ask the dashboard administrator to add your school email to the role configuration.")
-            st.stop()
         role = access["views"][0] if len(access["views"]) == 1 else st.radio("Role", access["views"], index=0)
         if len(access["views"]) == 1:
             st.caption(f"Role: **{role}**")
