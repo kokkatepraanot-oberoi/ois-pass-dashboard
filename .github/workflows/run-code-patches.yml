@@ -15,18 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply PASS UI patch
+      - name: Standardise PASS band display order
         run: |
-          python .github/scripts/patch_navigation_ui.py
+          python .github/scripts/patch_band_order.py
           python -m py_compile app.py pass_logic.py storage.py specialist_guidance.py persistent_actions.py drive_storage.py
       - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py
+          git add pass_logic.py
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
-          git commit -m "Upgrade PASS dashboard navigation UI"
+          git commit -m "Show immediate PASS factors before broader concerns"
           git push
