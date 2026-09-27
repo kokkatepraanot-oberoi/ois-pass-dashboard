@@ -685,7 +685,7 @@ def specialist_priority_table(df: pd.DataFrame, schema, factors: List[int], hist
     ]
     out = working[cols].copy().rename(columns={"Domain attention": "Specialist review"})
     if history_df is not None and has_history(history_df):
-        longi = longitudinal_status_table(history_df, df, schema, factors=factors)[["Student ID", "Longitudinal status", "Waves with concern"]]
+        longi = longitudinal_status_table(history_df, df, schema, factors=factors)[["Student ID", "Longitudinal status", "Concern waves (max factor)"]]
         out = out.merge(longi, on="Student ID", how="left")
     rank = {v: i for i, v in enumerate(ATTENTION_ORDER)}
     out["_rank"] = out["Specialist review"].map(rank).fillna(99)
@@ -713,7 +713,7 @@ def intervention_tracker(scope_label: str, key_prefix: str) -> None:
     key = f"tracker_{key_prefix}"
     if key not in st.session_state:
         st.session_state[key] = template.copy()
-    edited = st.data_editor(st.session_state[key], num_rows="dynamic", use_container_width=True, key=f"editor_{key_prefix}")
+    edited = st.data_editor(st.session_state[key], num_rows="dynamic", use_container_width=True, key=f"tracker_editor_{key_prefix}")
     st.session_state[key] = edited
     downloadable_csv(edited, f"Download {scope_label} intervention tracker", f"{key_prefix}_intervention_tracker.csv", f"dl_{key_prefix}")
     st.caption("This tracker is session-based in Streamlit. For long-term storage, export the CSV and keep it in the school's protected workflow.")
@@ -931,7 +931,7 @@ def render_hrt(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema, allowe
         priorities = student_priority_table(current)
         queue = priorities[priorities["Attention"].isin(["Immediate review", "Targeted support", "Monitor", "Not completed"])].copy()
         if has_history(history_df):
-            longi = longitudinal_status_table(history_df, current, schema)[["Student ID", "Longitudinal status", "Waves with concern"]]
+            longi = longitudinal_status_table(history_df, current, schema)[["Student ID", "Longitudinal status", "Concern waves (max factor)"]]
             queue = queue.merge(longi, on="Student ID", how="left")
         st.dataframe(queue, hide_index=True, use_container_width=True)
         downloadable_csv(queue, f"Download {homeroom} check-in queue", f"homeroom_{homeroom}_pass_checkins.csv", "hrt_students_dl")
