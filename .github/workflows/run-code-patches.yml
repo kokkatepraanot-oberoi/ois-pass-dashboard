@@ -15,18 +15,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply runtime stability patch
+      - name: Apply PASS patches
         run: |
           python .github/scripts/patch_runtime_stability.py
-          python -m py_compile app.py pass_logic.py storage.py specialist_guidance.py persistent_actions.py
+          python .github/scripts/patch_drive_source.py
+          python -m py_compile app.py pass_logic.py storage.py specialist_guidance.py persistent_actions.py drive_storage.py
       - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py pass_logic.py
+          git add app.py pass_logic.py drive_storage.py
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
-          git commit -m "Stabilise PASS longitudinal and student explorer views"
+          git commit -m "Persist PASS source files in OIS Drive"
           git push
