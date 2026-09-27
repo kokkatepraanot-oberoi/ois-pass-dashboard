@@ -523,9 +523,10 @@ def transition_chart(history_df: pd.DataFrame, schema, title: str, factors: List
         var_name="Transition",
         value_name="Students",
     )
+    long["PASS factor"] = long.apply(lambda r: f"Factor {int(r['Factor'])} – {r['Factor name']}", axis=1)
     fig = px.bar(
         long,
-        x="Factor",
+        x="PASS factor",
         y="Students",
         color="Transition",
         barmode="group",
@@ -581,11 +582,11 @@ def student_summary_text(history_df: pd.DataFrame, student_id: str, schema, fact
             continue
         name = FACTOR_NAMES[int(factor)]
         if last <= 20 and first > 20:
-            out.append(f"F{factor} {name} has become a current concern over time.")
+            out.append(f"Factor {factor} – {name} has become a current concern over time.")
         elif last > 30 and first <= 20:
-            out.append(f"F{factor} {name} has moved into a healthier band since the earlier survey.")
+            out.append(f"Factor {factor} – {name} has moved into a healthier band since the earlier survey.")
         elif last < first - 15:
-            out.append(f"F{factor} {name} has declined noticeably across the available waves.")
+            out.append(f"Factor {factor} – {name} has declined noticeably across the available waves.")
     return out[:4] or ["No strong longitudinal movement stands out across the selected factors."]
 
 

@@ -655,7 +655,6 @@ def longitudinal_status_table(history_df: pd.DataFrame, latest_df: pd.DataFrame,
                 "New factors": "; ".join(f"Factor {n} – {FACTOR_NAMES[n]}" for n in sorted(new_factors)),
                 "Recovered factors": "; ".join(f"Factor {n} – {FACTOR_NAMES[n]}" for n in sorted(recovered_factors)),
                 "Deteriorating factors": "; ".join(f"Factor {n} – {FACTOR_NAMES[n]}" for n in sorted(deterioration_factors)),
-                "Concern waves (max factor)": max(factor_concern_waves.values(), default=0),
                 "Repeated concern across survey waves": max(factor_concern_waves.values(), default=0),
                 "PASS waves available": int(hist["Wave key"].nunique()),
                 "Repeated concern meaning": (
@@ -672,7 +671,7 @@ def longitudinal_status_table(history_df: pd.DataFrame, latest_df: pd.DataFrame,
     rank = {v: i for i, v in enumerate(LONGITUDINAL_ORDER)}
     out["_rank"] = out["Longitudinal status"].map(rank).fillna(99)
     out = out.sort_values(
-        ["_rank", "Current factors ≤5", "Current factors ≤20", "Concern waves (max factor)", "Lowest percentile"],
+        ["_rank", "Current factors ≤5", "Current factors ≤20", "Repeated concern across survey waves", "Lowest percentile"],
         ascending=[True, False, False, False, True],
     ).drop(columns="_rank")
     return out
