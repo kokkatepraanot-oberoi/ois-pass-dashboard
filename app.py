@@ -30,6 +30,14 @@ from pass_logic import (
     wave_transition_summary,
 )
 
+from specialist_guidance import (
+    factor_label,
+    render_intervention_guidance,
+    render_reading_guide,
+)
+
+from persistent_actions import render_action_manager
+
 
 st.set_page_config(
     page_title="OIS Middle School PASS Dashboard",
@@ -405,7 +413,7 @@ def factor_chart(fs: pd.DataFrame, title: str) -> None:
         st.info("No completed PASS records in this selection.")
         return
     plot = fs.copy()
-    plot["Label"] = plot.apply(lambda r: f"F{int(r['Factor'])}", axis=1)
+    plot["Label"] = plot.apply(lambda r: f"Factor {int(r['Factor'])} – {r['Factor name']}", axis=1)
     fig = go.Figure()
     fig.add_bar(name="Lowest 5%", x=plot["Label"], y=plot["% ≤5"], marker_color="#ff6b6b")
     fig.add_bar(name="6–20th percentile", x=plot["Label"], y=(plot["% ≤20"] - plot["% ≤5"]), marker_color="#ffb020")
@@ -426,6 +434,8 @@ def factor_table(fs: pd.DataFrame) -> None:
     if fs.empty:
         return
     display = fs[["Factor", "Factor name", "Median percentile", "% ≤5", "% ≤20", "% 21–30", "% ≥31", "Completed"]].copy()
+    display.insert(0, "PASS factor", display.apply(lambda r: f"Factor {int(r['Factor'])} – {r['Factor name']}", axis=1))
+    display = display.drop(columns=["Factor", "Factor name"])
     display = display.sort_values(["% ≤20", "% ≤5"], ascending=False)
     st.dataframe(display, hide_index=True, use_container_width=True)
 
@@ -469,7 +479,7 @@ def trend_line_chart(history_df: pd.DataFrame, schema, title: str, factors: List
     if trend.empty:
         st.info("Not enough historical survey waves for this trend view.")
         return
-    trend["Series"] = trend["Factor"].apply(lambda n: f"F{int(n)}")
+    trend["Series"] = trend["Factor"].apply(lambda n: f"Factor {int(n)} – {FACTOR_NAMES[int(n)]}")
     x_col = "Wave"
     if "Grade at survey (inferred)" in history_df.columns and history_df["Grade"].nunique() == 1:
         wave_context = (
@@ -540,7 +550,7 @@ def show_action_cards(context_df: pd.DataFrame, schema, heading: str) -> None:
         return
     for idx, item in enumerate(actions):
         with st.expander(
-            f"F{item['factor']} – {item['name']} | {item['pct_concern']:.1f}% at/under 20th percentile",
+            f"Factor {item['factor']} – {item['name']} | {item['pct_concern']:.1f}% at/under 20th percentile",
             expanded=idx == 0,
         ):
             st.write(item["description"])
@@ -646,7 +656,7 @@ def show_student_profile(current_df: pd.DataFrame, history_df: pd.DataFrame, sch
     st.markdown("**Useful student questions**")
     for _, r in profile.sort_values("Percentile", na_position="last").head(2).iterrows():
         item = INTERVENTIONS[int(r["Factor"])]
-        st.markdown(f"**F{int(r['Factor'])} {r['Factor name']}**")
+        st.markdown(f"**Factor {int(r['Factor'])} – {r['Factor name']}**")
         for q in item["questions"]:
             st.markdown(f"- {q}")
 
@@ -667,13 +677,39 @@ def build_domain_data(df: pd.DataFrame, schema, factors: List[int]) -> pd.DataFr
             return "Monitor"
         return "Generally positive"
 
-    out["Domain attention"] = out.apply(domain_attention, axis=1)
-    out["Domain factors ≤5"] = out[cols].apply(lambda row: int((row <= 5).sum()) if row.notna().all() else 0, axis=1)
-    out["Domain factors ≤20"] = out[cols].apply(lambda row: int((row <= 20).sum()) if row.notna().all() else 0, axis=1)
-    out["Domain factors 21–30"] = out[cols].apply(lambda row: int(((row >= 21) & (row <= 30)).sum()) if row.notna().all() else 0, axis=1)
-    out["Lowest relevant percentile"] = out[cols].min(axis=1, skipna=True)
-    return out
+    def factor_list(row, lower, upper):
+        values = []
+        for number in factors:
+            value = row[schema.factor_cols[number]]
+            if pd.isna(value):
+                continue
+            if lower <= float(value) <= upper:
+                values.append(f"{factor_label(number)} (percentile {float(value):.1f})")
+        return "; ".join(values)
 
+    out["Specialist priority"] = out.apply(domain_attention, axis=1)
+    out["Immediate concern factors (≤5th percentile)"] = out.apply(lambda r: factor_list(r, 0, 5), axis=1)
+    out["Targeted concern factors (6th–20th percentile)"] = out.apply(lambda r: factor_list(r, 6, 20), axis=1)
+    out["Watch factors (21st–30th percentile)"] = out.apply(lambda r: factor_list(r, 21, 30), axis=1)
+    out["Number of immediate concern factors"] = out[cols].apply(lambda row: int((row <= 5).sum()) if row.notna().all() else 0, axis=1)
+    out["Number of concern factors (≤20th)"] = out[cols].apply(lambda row: int((row <= 20).sum()) if row.notna().all() else 0, axis=1)
+    out["Number of watch factors (21st–30th)"] = out[cols].apply(lambda row: int(((row >= 21) & (row <= 30)).sum()) if row.notna().all() else 0, axis=1)
+    out["Lowest relevant percentile"] = out[cols].min(axis=1, skipna=True)
+
+    def why(row):
+        status = row["Specialist priority"]
+        if status == "Immediate review":
+            return "At least one specialist-relevant factor is at or below the 5th percentile. Review promptly and triangulate with other evidence."
+        if status == "Targeted support":
+            return "At least one specialist-relevant factor is between the 6th and 20th percentile. A planned check-in/support response may be appropriate."
+        if status == "Monitor":
+            return "No specialist factor is ≤20, but at least one is in the 21st–30th percentile watch band. Monitor and use other evidence before intervening."
+        if status == "Generally positive":
+            return "All specialist-relevant factors are at or above the 31st percentile in the latest PASS wave."
+        return "PASS was not completed in the latest wave."
+
+    out["Why this is a concern"] = out.apply(why, axis=1)
+    return out
 
 def specialist_summary(df: pd.DataFrame, schema, factors: List[int], group_col: str) -> pd.DataFrame:
     working = build_domain_data(df, schema, factors)
@@ -693,17 +729,30 @@ def specialist_summary(df: pd.DataFrame, schema, factors: List[int], group_col: 
 def specialist_priority_table(df: pd.DataFrame, schema, factors: List[int], history_df: pd.DataFrame | None = None) -> pd.DataFrame:
     working = build_domain_data(df, schema, factors)
     cols = [
-        "Student", "Student ID", "Grade", "Homeroom", "Domain attention", "Domain factors ≤5", "Domain factors ≤20", "Domain factors 21–30", "Lowest relevant percentile", "Attention",
+        "Student", "Student ID", "Grade", "Homeroom", "Specialist priority",
+        "Immediate concern factors (≤5th percentile)",
+        "Targeted concern factors (6th–20th percentile)",
+        "Watch factors (21st–30th percentile)",
+        "Number of immediate concern factors",
+        "Number of concern factors (≤20th)",
+        "Number of watch factors (21st–30th)",
+        "Lowest relevant percentile", "Why this is a concern", "Attention",
     ]
-    out = working[cols].copy().rename(columns={"Domain attention": "Specialist review"})
+    out = working[cols].copy()
     if history_df is not None and has_history(history_df):
-        longi = longitudinal_status_table(history_df, df, schema, factors=factors)[["Student ID", "Longitudinal status", "Concern waves (max factor)"]]
+        long_cols = [
+            "Student ID", "Longitudinal status", "Repeated concern across survey waves",
+            "PASS waves available", "Repeated concern meaning", "Chronic factors",
+            "Persistent factors", "New factors", "Recovered factors", "Deteriorating factors",
+        ]
+        longi = longitudinal_status_table(history_df, df, schema, factors=factors)[long_cols]
         out = out.merge(longi, on="Student ID", how="left")
     rank = {v: i for i, v in enumerate(ATTENTION_ORDER)}
-    out["_rank"] = out["Specialist review"].map(rank).fillna(99)
-    out = out.sort_values(["_rank", "Domain factors ≤5", "Domain factors ≤20", "Lowest relevant percentile"], ascending=[True, False, False, True]).drop(columns="_rank")
-    return out
-
+    out["_rank"] = out["Specialist priority"].map(rank).fillna(99)
+    return out.sort_values(
+        ["_rank", "Number of immediate concern factors", "Number of concern factors (≤20th)", "Lowest relevant percentile"],
+        ascending=[True, False, False, True],
+    ).drop(columns="_rank")
 
 def intervention_tracker(scope_label: str, key_prefix: str) -> None:
     st.markdown("**Intervention tracker (session-based)**")
@@ -849,7 +898,7 @@ def render_slt(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema) -> Non
         st.markdown("- Which 2–3 factor patterns require a system response rather than individual casework?")
         st.markdown("- Which grade or homeroom requires follow-up support or capacity-building?")
         st.markdown("- Which emerging patterns look new this cycle and therefore deserve immediate enquiry?")
-        intervention_tracker("SLT", "slt")
+        render_action_manager(pd.DataFrame(), "SLT", "Whole Middle School", "slt", schema, latest_wave=latest_df["Wave"].iloc[0])
         download_excel_bundle(latest_df, history_df, schema, "Download SLT analysis workbook", "OIS_PASS_SLT_analysis.xlsx", "slt_excel_bundle")
 
 
@@ -899,8 +948,7 @@ def render_gl(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema, allowed
         focus = priorities[priorities["Attention"] != "Generally positive"].copy()
         st.dataframe(focus, hide_index=True, use_container_width=True)
         show_action_cards(current, schema, f"{grade}: intervention priorities")
-        intervention_tracker(grade, f"gl_{grade.replace(' ', '_')}")
-        workflow_editor(focus, f"gl_{grade.replace(' ', '_')}", "Student intervention / review log")
+        render_action_manager(focus, "Grade Level Leader", grade, f"gl_{grade.replace(' ', '_')}", schema, latest_wave=current["Wave"].iloc[0])
 
     with tabs[5]:
         show_student_profile(current, history_df if has_history(history_df) else current, schema, "gl")
@@ -956,8 +1004,7 @@ def render_hrt(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema, allowe
 
     with tabs[3]:
         show_action_cards(current, schema, f"Homeroom {homeroom}: most useful actions")
-        intervention_tracker(homeroom, f"hrt_{homeroom}")
-        workflow_editor(queue if 'queue' in locals() else student_priority_table(current), f"hrt_{homeroom}", "HRT check-in / review log")
+        render_action_manager(queue if 'queue' in locals() else student_priority_table(current), "Homeroom Teacher", homeroom, f"hrt_{homeroom}", schema, latest_wave=current["Wave"].iloc[0])
         st.warning("If a conversation raises a safeguarding concern, stop using PASS as the decision framework and follow the school's safeguarding process immediately.")
 
     with tabs[4]:
@@ -970,14 +1017,16 @@ def render_specialist(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema,
     current = latest_df.copy() if scope == "Whole Middle School" else latest_df[latest_df["Grade"] == scope].copy()
     history = history_df.copy() if scope == "Whole Middle School" else history_df[history_df["Grade"] == scope].copy()
     st.markdown(f'<div class="ois-callout"><b>{role_name}:</b> {intro}</div>', unsafe_allow_html=True)
+    render_reading_guide(role_name)
     metric_strip(current, extra_label="Specialist factors", extra_value=len(factors))
-    tabs = st.tabs(["Profile", "Cohort patterns", "Review queue", "Intervention planning", "Student explorer"])
+    tabs = st.tabs(["Profile", "Cohort patterns", "Review queue", "How to intervene", "Student explorer"])
 
     with tabs[0]:
         fs = factor_summary(current, schema)
         fs = fs[fs["Factor"].isin(factors)]
         factor_chart(fs, f"{scope}: {role_name} factor profile")
         factor_table(fs)
+        st.markdown("**Specialist factors in this view:** " + "; ".join(factor_label(n) for n in factors))
 
     with tabs[1]:
         group_col = "Grade" if scope == "Whole Middle School" else "Homeroom"
@@ -988,23 +1037,50 @@ def render_specialist(latest_df: pd.DataFrame, history_df: pd.DataFrame, schema,
             trend_title = "Whole Middle School: specialist trend over time" if scope == "Whole Middle School" else f"Current {scope} cohort: specialist PASS journey over time"
             trend_line_chart(history, schema, trend_title, factors=factors)
             if scope != "Whole Middle School":
-                st.caption("* Earlier year labels are inferred from the student’s current year and survey date. Testwise stamps current year/group labels onto historical rows, so earlier points may be Primary results for current Year 6 students.")
+                st.caption("* Earlier year labels are inferred from the student's current year and survey date. Testwise stamps current year/group labels onto historical rows, so earlier points may be Primary results for current Year 6 students.")
 
     with tabs[2]:
         queue = specialist_priority_table(current, schema, factors, history_df if has_history(history_df) else None)
-        queue = queue[queue["Specialist review"].isin(["Immediate review", "Targeted support", "Monitor"])].copy()
-        st.dataframe(queue, hide_index=True, use_container_width=True)
-        downloadable_csv(queue, f"Download {role_name} review queue", f"{role_name.lower().replace(' ', '_')}_review_queue.csv", f"{role_name}_dl")
+        queue = queue[queue["Specialist priority"].isin(["Immediate review", "Targeted support", "Monitor"])].copy()
+        st.markdown("#### Review queue")
+        st.caption("Read the named factor columns first. The counts are secondary. A student appears here because at least one factor relevant to this specialist role is in an intervention/watch band.")
+        filter_priority = st.multiselect(
+            "Show priorities",
+            ["Immediate review", "Targeted support", "Monitor"],
+            default=["Immediate review", "Targeted support", "Monitor"],
+            key=f"specialist_filter_{role_name}",
+        )
+        display_queue = queue[queue["Specialist priority"].isin(filter_priority)].copy()
+        preferred = [
+            "Student", "Student ID", "Grade", "Homeroom", "Specialist priority",
+            "Immediate concern factors (≤5th percentile)",
+            "Targeted concern factors (6th–20th percentile)",
+            "Watch factors (21st–30th percentile)",
+            "Why this is a concern", "Longitudinal status",
+            "Repeated concern across survey waves", "PASS waves available", "Repeated concern meaning",
+        ]
+        st.dataframe(display_queue[[c for c in preferred if c in display_queue.columns]], hide_index=True, use_container_width=True)
+        downloadable_csv(display_queue, f"Download {role_name} review queue", f"{role_name.lower().replace(' ', '_')}_review_queue.csv", f"{role_name}_dl")
         st.caption(queue_caption)
 
     with tabs[3]:
-        show_action_cards(current[[*current.columns]], schema, f"{scope}: priority actions")
-        intervention_tracker(role_name, role_name.lower().replace(' ', '_'))
-        workflow_editor(queue if 'queue' in locals() else specialist_priority_table(current, schema, factors), role_name.lower().replace(' ', '_'), f"{role_name} review log")
+        render_intervention_guidance(role_name)
+        st.divider()
+        st.markdown("### Put the intervention into action")
+        queue_for_actions = specialist_priority_table(current, schema, factors, history_df if has_history(history_df) else None)
+        queue_for_actions = queue_for_actions[queue_for_actions["Specialist priority"].isin(["Immediate review", "Targeted support", "Monitor"])].copy()
+        render_action_manager(
+            queue_for_actions,
+            role_name,
+            f"{role_name} | {scope}",
+            role_name.lower().replace(" ", "_"),
+            schema,
+            factors=factors,
+            latest_wave=current["Wave"].iloc[0],
+        )
 
     with tabs[4]:
         show_student_profile(current, history_df if has_history(history_df) else current, schema, role_name.lower().replace(' ', '_'), factors=factors)
-
 
 def main() -> None:
     apply_theme()

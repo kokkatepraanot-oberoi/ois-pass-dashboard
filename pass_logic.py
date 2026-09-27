@@ -343,9 +343,9 @@ def prepare_data(df: pd.DataFrame, schema: Schema) -> pd.DataFrame:
             if pd.isna(val):
                 continue
             if low is None and val <= high:
-                names.append(f"F{n} {FACTOR_SHORT[n]}")
+                names.append(f"Factor {n} – {FACTOR_NAMES[n]}")
             elif low is not None and low <= val <= high:
-                names.append(f"F{n} {FACTOR_SHORT[n]}")
+                names.append(f"Factor {n} – {FACTOR_NAMES[n]}")
         return "; ".join(names)
 
     out["Bottom 5% factors"] = out.apply(lambda r: factors_in_range(r, None, 5), axis=1)
@@ -357,7 +357,7 @@ def prepare_data(df: pd.DataFrame, schema: Schema) -> pd.DataFrame:
         if not vals:
             return ""
         n = min(vals, key=vals.get)
-        return f"F{n} {FACTOR_NAMES[n]}"
+        return f"Factor {n} – {FACTOR_NAMES[n]}"
 
     out["Lowest factor"] = out.apply(lowest_factor, axis=1)
     return out
@@ -464,7 +464,7 @@ def homeroom_summary(df: pd.DataFrame, schema: Schema) -> pd.DataFrame:
             top_factors.append(("", 0.0))
         else:
             row = fs.sort_values(["% ≤20", "% ≤5"], ascending=False).iloc[0]
-            top_factors.append((f"F{int(row['Factor'])} {row['Factor name']}", float(row["% ≤20"])))
+            top_factors.append((f"Factor {int(row['Factor'])} – {row['Factor name']}", float(row["% ≤20"])))
     base["Most common concern"] = [x[0] for x in top_factors]
     base["Top concern % ≤20"] = [x[1] for x in top_factors]
     return base.sort_values(["Immediate/targeted %", "Immediate review"], ascending=False)
@@ -548,7 +548,7 @@ def context_summary_text(df: pd.DataFrame, schema: Schema) -> str:
     parts.append(
         "Highest concern factors: "
         + ", ".join(
-            f"F{int(r['Factor'])} {r['Factor name']} ({r['% ≤20']:.1f}% at/under 20th percentile)"
+            f"Factor {int(r['Factor'])} – {r['Factor name']} ({r['% ≤20']:.1f}% at/under 20th percentile)"
             for _, r in top.iterrows()
         )
         + "."
@@ -650,12 +650,19 @@ def longitudinal_status_table(history_df: pd.DataFrame, latest_df: pd.DataFrame,
                 "Current factors ≤5": len(current_immediate),
                 "Current factors 21–30": len(current_moderate),
                 "Previous factors ≤20": len(previous_concerns),
-                "Chronic factors": "; ".join(f"F{n} {FACTOR_SHORT[n]}" for n in sorted(chronic_factors)),
-                "Persistent factors": "; ".join(f"F{n} {FACTOR_SHORT[n]}" for n in sorted(persistent_factors)),
-                "New factors": "; ".join(f"F{n} {FACTOR_SHORT[n]}" for n in sorted(new_factors)),
-                "Recovered factors": "; ".join(f"F{n} {FACTOR_SHORT[n]}" for n in sorted(recovered_factors)),
-                "Deteriorating factors": "; ".join(f"F{n} {FACTOR_SHORT[n]}" for n in sorted(deterioration_factors)),
+                "Chronic factors": "; ".join(f"Factor {n} – {FACTOR_NAMES[n]}" for n in sorted(chronic_factors)),
+                "Persistent factors": "; ".join(f"Factor {n} – {FACTOR_NAMES[n]}" for n in sorted(persistent_factors)),
+                "New factors": "; ".join(f"Factor {n} – {FACTOR_NAMES[n]}" for n in sorted(new_factors)),
+                "Recovered factors": "; ".join(f"Factor {n} – {FACTOR_NAMES[n]}" for n in sorted(recovered_factors)),
+                "Deteriorating factors": "; ".join(f"Factor {n} – {FACTOR_NAMES[n]}" for n in sorted(deterioration_factors)),
                 "Concern waves (max factor)": max(factor_concern_waves.values(), default=0),
+                "Repeated concern across survey waves": max(factor_concern_waves.values(), default=0),
+                "PASS waves available": int(hist["Wave key"].nunique()),
+                "Repeated concern meaning": (
+                    f"At least one selected PASS factor scored at or below the 20th percentile in "
+                    f"{max(factor_concern_waves.values(), default=0)} of {int(hist['Wave key'].nunique())} available survey waves. "
+                    "This is not a count of different problems and the waves do not have to be consecutive."
+                ),
                 "Lowest factor": row["Lowest factor"],
                 "Lowest percentile": row["Lowest percentile"],
                 "≤20th percentile factors": row["≤20th percentile factors"],
